@@ -5,12 +5,6 @@ FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy
 WORKDIR /app
 
 # Optional: Puppeteer stealth plugin (Node engine — node/npm included in base image)
-# tzdata required for TZ env var (e.g. Europe/London) to work in tzlocal.
-# DEBIAN_FRONTEND=noninteractive prevents the interactive timezone prompt.
-RUN DEBIAN_FRONTEND=noninteractive TZ=UTC \
-    apt-get update && apt-get install -y --no-install-recommends tzdata \
-    && rm -rf /var/lib/apt/lists/*
-
 RUN npm install -g puppeteer-extra puppeteer-extra-plugin-stealth 2>/dev/null || true
 
 # Python dependencies
@@ -31,7 +25,7 @@ ENV PORT=3000
 ENV HOST=0.0.0.0
 ENV PYTHONUNBUFFERED=1
 ENV LOG_LEVEL=info
-ENV TZ=Europe/London
+ENV TZ=UTC
 
 EXPOSE 3000
 
