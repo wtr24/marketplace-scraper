@@ -66,33 +66,3 @@ jobs:
             ${{ secrets.DOCKER_USERNAME }}/marketplace-scraper-nginx:sha-${{ github.sha }}
           cache-from: type=gha,scope=nginx
           cache-to: type=gha,mode=max,scope=nginx
-
-      - name: Deploy to NAS
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.NAS_HOST }}
-          username: admin
-          key: ${{ secrets.NAS_SSH_KEY }}
-          script: |
-            cd /volume1/docker/marketplace-scraper
-            docker compose pull
-            docker compose up -d
-            sleep 15
-            curl -sf http://localhost:3003/api/health || exit 1
-
-      - name: Discord Notification
-        if: always()
-        env:
-          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: |
-          STATUS="${{ job.status }}"
-          COLOR=$([[ "$STATUS" == "success" ]] && echo "3066993" || echo "15158332")
-          ICON=$([[ "$STATUS" == "success" ]] && echo "✅" || echo "❌")
-          curl -s -X POST "$WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d "{\"embeds\":[{
-              \"title\":\"$ICON Marketplace Scraper — Deploy $STATUS\",
-              \"description\":\"**Commit:** ${{ github.event.head_commit.message }}\n**Branch:** ${{ github.ref_name }}\n**SHA:** \`${{ github.sha }}\`\",
-              \"color\":$COLOR,
-              \"footer\":{\"text\":\"wtr24/marketplace-scraper · http://192.168.0.18:3003\"}
-            }]}"
