@@ -5,6 +5,10 @@ FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy
 WORKDIR /app
 
 # Optional: Puppeteer stealth plugin (Node engine — node/npm included in base image)
+# tzdata required for TZ env var (e.g. Europe/London) to work in tzlocal
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN npm install -g puppeteer-extra puppeteer-extra-plugin-stealth 2>/dev/null || true
 
 # Python dependencies

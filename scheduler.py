@@ -26,7 +26,7 @@ def start():
     if not scheduler.running:
         scheduler.add_job(
             _run_all_active_jobs,
-            trigger=IntervalTrigger(minutes=5),
+            trigger=IntervalTrigger(minutes=5, timezone="UTC"),
             id="scraper_main",
             replace_existing=True,
             max_instances=1,
