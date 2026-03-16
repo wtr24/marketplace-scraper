@@ -24,7 +24,7 @@ asyncpg==0.29.0       # optional: Postgres support
 
 # Utilities
 python-dotenv==1.0.1
-lxml==5.2.2
+lxml>=5.2.2
 fake-useragent==1.5.1
 
 # Testing
