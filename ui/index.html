@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marketplace Scraper</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .site-vinted  { background:#09b1ba; }
+    .site-ebay    { background:#e53238; }
+    .site-depop   { background:#ff2300; }
+    .engine-badge { font-size:.65rem; padding:2px 6px; border-radius:4px; }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen font-sans" x-data="app()" x-init="init()">
+
+<!-- ── Nav ──────────────────────────────────────────────────────────────── -->
+<nav class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center gap-6">
+  <span class="text-lg font-bold text-indigo-400">🛒 Marketplace Scraper</span>
+  <template x-for="tab in tabs" :key="tab.id">
+    <button
+      @click="activeTab = tab.id"
+      :class="activeTab === tab.id ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-gray-100'"
+      class="pb-1 text-sm font-medium transition-colors"
+      x-text="tab.label"
+    ></button>
+  </template>
+  <div class="ml-auto flex items-center gap-3 text-xs text-gray-500">
+    <span :class="wsConnected ? 'text-green-400' : 'text-red-400'">
+      ● <span x-text="wsConnected ? 'Live' : 'Offline'"></span>
+    </span>
+    <span x-text="'Next run: ' + (stats.next_run ? relativeTime(stats.next_run) : '—')"></span>
+  </div>
+</nav>
+
+<!-- ── Dashboard ──────────────────────────────────────────────────────────── -->
+<div x-show="activeTab === 'dashboard'" x-cloak class="p-6 max-w-7xl mx-auto">
+  <h1 class="text-xl font-semibold mb-5">Dashboard</h1>
+
+  <!-- Summary cards -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+    <template x-for="card in statCards" :key="card.label">
+      <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+        <div class="text-2xl font-bold text-indigo-300" x-text="card.value"></div>
+        <div class="text-xs text-gray-400 mt-1" x-text="card.label"></div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Live feed -->
+  <div class="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
+    <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
+      <span class="font-medium text-sm">Recent Listings</span>
+      <button @click="loadStats()" class="text-xs text-indigo-400 hover:underline">Refresh</button>
+    </div>
+    <div class="divide-y divide-gray-800">
+      <template x-if="stats.recent_listings && stats.recent_listings.length === 0">
+        <div class="p-6 text-center text-gray-500 text-sm">No listings yet — create a job to start scraping.</div>
+      </template>
+      <template x-for="l in (stats.recent_listings || [])" :key="l.id">
+        <div class="flex items-center gap-4 px-4 py-3 hover:bg-gray-800 transition-colors">
+          <img :src="l.image_url || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\'%3E%3Crect width=\'48\' height=\'48\' rx=\'4\' fill=\'%23374151\'/%3E%3C/svg%3E'"
+               class="w-12 h-12 rounded object-cover flex-shrink-0 bg-gray-700"
+               @error="$el.src = 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\'%3E%3Crect width=\'48\' height=\'48\' rx=\'4\' fill=\'%23374151\'/%3E%3C/svg%3E'" />
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium truncate" x-text="l.title || '—'"></div>
+            <div class="text-xs text-gray-400 mt-0.5">
+              <span x-text="l.seller ? '@' + l.seller : ''"></span>
+              <span class="mx-1 text-gray-600">·</span>
+              <span x-text="relativeTime(l.scraped_at)"></span>
+            </div>
+          </div>
+          <div class="flex items-center gap-3 flex-shrink-0">
+            <span class="text-sm font-semibold text-green-400" x-text="l.price ? '£' + l.price.toFixed(2) : '—'"></span>
+            <span class="text-xs px-2 py-0.5 rounded text-white"
+                  :class="'site-' + l.site"
+                  x-text="l.site"></span>
+            <a v-if="l.listing_url" :href="l.listing_url" target="_blank"
+               class="text-xs text-indigo-400 hover:underline">View →</a>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+
+<!-- ── Job Manager ────────────────────────────────────────────────────────── -->
+<div x-show="activeTab === 'jobs'" x-cloak class="p-6 max-w-5xl mx-auto">
+  <div class="flex items-center justify-between mb-5">
+    <h1 class="text-xl font-semibold">Job Manager</h1>
+    <button @click="showJobForm = !showJobForm"
+            class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg transition-colors">
+      + New Job
+    </button>
+  </div>
+
+  <!-- New job form -->
+  <div x-show="showJobForm" x-transition class="bg-gray-800 rounded-xl border border-gray-700 p-5 mb-6">
+    <h2 class="font-medium mb-4" x-text="editingJob ? 'Edit Job' : 'Create New Job'"></h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">Search Term</label>
+        <input x-model="jobForm.search_term" type="text" placeholder="e.g. vintage Levi jacket"
+               class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">Engine</label>
+        <select x-model="jobForm.engine"
+                class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+          <template x-for="e in engines" :key="e.id">
+            <option :value="e.id" x-text="e.id + ' — ' + e.description.split('—')[0].trim()"></option>
+          </template>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-2">Target Sites</label>
+        <div class="flex gap-4">
+          <template x-for="site in availableSites" :key="site">
+            <label class="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" :value="site" x-model="jobForm.sites"
+                     class="accent-indigo-500" />
+              <span x-text="site" class="capitalize"></span>
+            </label>
+          </template>
+        </div>
+      </div>
+    </div>
+    <div class="flex gap-3 mt-4">
+      <button @click="submitJob()"
+              :disabled="!jobForm.search_term || jobForm.sites.length === 0"
+              class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+              x-text="editingJob ? 'Save Changes' : 'Create Job'">
+      </button>
+      <button @click="cancelJobForm()" class="text-gray-400 hover:text-gray-100 text-sm px-4 py-2">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Jobs table -->
+  <div class="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
+    <template x-if="jobs.length === 0">
+      <div class="p-8 text-center text-gray-500 text-sm">No jobs yet.</div>
+    </template>
+    <table x-show="jobs.length > 0" class="w-full text-sm">
+      <thead class="border-b border-gray-700">
+        <tr class="text-xs text-gray-400">
+          <th class="text-left px-4 py-3">Search Term</th>
+          <th class="text-left px-4 py-3">Engine</th>
+          <th class="text-left px-4 py-3">Sites</th>
+          <th class="text-left px-4 py-3">Status</th>
+          <th class="text-left px-4 py-3">Last Run</th>
+          <th class="text-left px-4 py-3">Runs</th>
+          <th class="px-4 py-3"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-800">
+        <template x-for="job in jobs" :key="job.id">
+          <tr class="hover:bg-gray-800 transition-colors">
+            <td class="px-4 py-3 font-medium" x-text="job.search_term"></td>
+            <td class="px-4 py-3">
+              <span class="bg-gray-700 text-gray-200 engine-badge" x-text="job.engine"></span>
+            </td>
+            <td class="px-4 py-3">
+              <div class="flex gap-1">
+                <template x-for="s in job.sites" :key="s">
+                  <span class="text-white text-xs px-1.5 py-0.5 rounded capitalize" :class="'site-' + s" x-text="s"></span>
+                </template>
+              </div>
+            </td>
+            <td class="px-4 py-3">
+              <button @click="toggleJob(job)"
+                      :class="job.active ? 'bg-green-800 text-green-300' : 'bg-gray-700 text-gray-400'"
+                      class="text-xs px-2 py-0.5 rounded-full"
+                      x-text="job.active ? 'Active' : 'Paused'">
+              </button>
+            </td>
+            <td class="px-4 py-3 text-gray-400 text-xs" x-text="job.last_run ? relativeTime(job.last_run) : 'Never'"></td>
+            <td class="px-4 py-3 text-gray-400" x-text="job.run_count"></td>
+            <td class="px-4 py-3">
+              <div class="flex gap-2 justify-end">
+                <button @click="triggerJob(job.id)" title="Run now"
+                        class="text-xs text-indigo-400 hover:text-indigo-300 px-2 py-1 rounded hover:bg-gray-700">▶</button>
+                <button @click="editJob(job)" title="Edit"
+                        class="text-xs text-gray-400 hover:text-gray-100 px-2 py-1 rounded hover:bg-gray-700">✎</button>
+                <button @click="deleteJob(job.id)" title="Delete"
+                        class="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-gray-700">✕</button>
+              </div>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── Benchmark Runner ────────────────────────────────────────────────────── -->
+<div x-show="activeTab === 'benchmark'" x-cloak class="p-6 max-w-6xl mx-auto">
+  <h1 class="text-xl font-semibold mb-5">Benchmark Runner</h1>
+
+  <div class="bg-gray-800 rounded-xl border border-gray-700 p-5 mb-6">
+    <div class="flex flex-wrap gap-4 items-end">
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">Test Query</label>
+        <input x-model="benchQuery" type="text" placeholder="vintage jacket"
+               class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 w-56" />
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-2">Engines</label>
+        <div class="flex flex-wrap gap-3">
+          <template x-for="e in engines" :key="e.id">
+            <label class="flex items-center gap-1.5 text-xs cursor-pointer">
+              <input type="checkbox" :value="e.id" x-model="benchEngines" class="accent-indigo-500" />
+              <span x-text="e.id"></span>
+            </label>
+          </template>
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-2">Sites</label>
+        <div class="flex gap-3">
+          <template x-for="s in availableSites" :key="s">
+            <label class="flex items-center gap-1.5 text-xs cursor-pointer">
+              <input type="checkbox" :value="s" x-model="benchSites" class="accent-indigo-500" />
+              <span x-text="s" class="capitalize"></span>
+            </label>
+          </template>
+        </div>
+      </div>
+      <button @click="runBenchmark()"
+              :disabled="benchRunning || benchEngines.length === 0 || benchSites.length === 0"
+              class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm px-5 py-2 rounded-lg transition-colors flex items-center gap-2">
+        <svg x-show="benchRunning" class="spin w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+        </svg>
+        <span x-text="benchRunning ? 'Running…' : 'Run Benchmark'"></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Results table -->
+  <div x-show="benchResults.length > 0" class="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="border-b border-gray-700">
+        <tr class="text-xs text-gray-400">
+          <th class="text-left px-4 py-3">Engine</th>
+          <th class="text-left px-4 py-3">Site</th>
+          <th class="text-left px-4 py-3">Status</th>
+          <th class="text-left px-4 py-3">Duration</th>
+          <th class="text-left px-4 py-3">Items Found</th>
+          <th class="text-left px-4 py-3">Memory</th>
+          <th class="text-left px-4 py-3">Notes</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-800">
+        <template x-for="r in benchResults" :key="r.id || r.engine + r.site">
+          <tr :class="r._winner ? 'bg-green-950' : 'hover:bg-gray-800'" class="transition-colors">
+            <td class="px-4 py-3">
+              <span class="bg-gray-700 text-gray-200 engine-badge" x-text="r.engine || '—'"></span>
+              <span x-show="r._winner" class="ml-2 text-xs text-yellow-400">★ Best</span>
+            </td>
+            <td class="px-4 py-3">
+              <span class="text-white text-xs px-1.5 py-0.5 rounded capitalize" :class="'site-' + r.site" x-text="r.site"></span>
+            </td>
+            <td class="px-4 py-3">
+              <span :class="r.success ? 'text-green-400' : 'text-red-400'" x-text="r.success ? '✓ OK' : '✗ Failed'"></span>
+            </td>
+            <td class="px-4 py-3 text-gray-300" x-text="r.duration_ms ? r.duration_ms + ' ms' : '—'"></td>
+            <td class="px-4 py-3 text-gray-300" x-text="r.items_found ?? '—'"></td>
+            <td class="px-4 py-3 text-gray-300" x-text="r.memory_mb ? r.memory_mb + ' MB' : '—'"></td>
+            <td class="px-4 py-3 text-gray-400 text-xs max-w-xs truncate" x-text="r.error_message || ''"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── Listings Browser ───────────────────────────────────────────────────── -->
+<div x-show="activeTab === 'listings'" x-cloak class="p-6 max-w-7xl mx-auto">
+  <div class="flex flex-wrap items-end gap-4 mb-6">
+    <h1 class="text-xl font-semibold w-full">Listings Browser</h1>
+
+    <!-- Filters -->
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Site</label>
+      <select x-model="listingsFilter.site" @change="loadListings()"
+              class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm">
+        <option value="">All sites</option>
+        <template x-for="s in availableSites" :key="s">
+          <option :value="s" x-text="s" class="capitalize"></option>
+        </template>
+      </select>
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Job</label>
+      <select x-model="listingsFilter.job_id" @change="loadListings()"
+              class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm">
+        <option value="">All jobs</option>
+        <template x-for="j in jobs" :key="j.id">
+          <option :value="j.id" x-text="'#' + j.id + ' ' + j.search_term"></option>
+        </template>
+      </select>
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Min £</label>
+      <input x-model.number="listingsFilter.min_price" @change="loadListings()" type="number" min="0"
+             class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm w-24" />
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Max £</label>
+      <input x-model.number="listingsFilter.max_price" @change="loadListings()" type="number" min="0"
+             class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm w-24" />
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Sort</label>
+      <select x-model="listingsFilter.sort" @change="loadListings()"
+              class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm">
+        <option value="newest">Newest</option>
+        <option value="price_asc">Price ↑</option>
+        <option value="price_desc">Price ↓</option>
+      </select>
+    </div>
+    <button @click="loadListings()" class="bg-gray-700 hover:bg-gray-600 text-sm px-4 py-2 rounded-lg">
+      Refresh
+    </button>
+    <span class="text-xs text-gray-500 ml-auto" x-text="listingsTotal + ' total listings'"></span>
+  </div>
+
+  <!-- Grid -->
+  <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+    <template x-if="listings.length === 0">
+      <div class="col-span-full text-center text-gray-500 text-sm py-12">No listings found.</div>
+    </template>
+    <template x-for="l in listings" :key="l.id">
+      <a :href="l.listing_url || '#'" target="_blank"
+         class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden hover:border-indigo-500 transition-colors group block">
+        <div class="relative">
+          <img :src="l.image_url || ''"
+               class="w-full aspect-square object-cover bg-gray-700"
+               @error="$el.style.display='none'" />
+          <span class="absolute top-2 left-2 text-white text-xs px-1.5 py-0.5 rounded capitalize"
+                :class="'site-' + l.site" x-text="l.site"></span>
+        </div>
+        <div class="p-3">
+          <div class="text-sm font-medium line-clamp-2 mb-1" x-text="l.title || '—'"></div>
+          <div class="flex items-center justify-between">
+            <span class="text-green-400 font-semibold" x-text="l.price ? '£' + l.price.toFixed(2) : '—'"></span>
+            <span class="text-xs text-gray-500" x-text="l.brand || ''"></span>
+          </div>
+          <div class="text-xs text-gray-500 mt-1 truncate" x-text="l.seller ? '@' + l.seller : ''"></div>
+        </div>
+      </a>
+    </template>
+  </div>
+
+  <!-- Pagination -->
+  <div x-show="listingsTotal > listingsLimit" class="flex justify-center gap-3 mt-8">
+    <button @click="listingsOffset = Math.max(0, listingsOffset - listingsLimit); loadListings()"
+            :disabled="listingsOffset === 0"
+            class="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-sm px-4 py-2 rounded-lg">
+      ← Prev
+    </button>
+    <span class="text-sm text-gray-400 py-2"
+          x-text="'Page ' + (Math.floor(listingsOffset / listingsLimit) + 1) + ' of ' + Math.ceil(listingsTotal / listingsLimit)">
+    </span>
+    <button @click="listingsOffset += listingsLimit; loadListings()"
+            :disabled="listingsOffset + listingsLimit >= listingsTotal"
+            class="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-sm px-4 py-2 rounded-lg">
+      Next →
+    </button>
+  </div>
+</div>
+
+<!-- ── Toast ──────────────────────────────────────────────────────────────── -->
+<div x-show="toast.show" x-transition
+     :class="toast.type === 'error' ? 'bg-red-800 border-red-600' : 'bg-green-800 border-green-600'"
+     class="fixed bottom-4 right-4 border rounded-lg px-4 py-3 text-sm shadow-lg z-50 max-w-xs"
+     x-text="toast.message">
+</div>
+
+<script>
+function app() {
+  return {
+    // ── State ──────────────────────────────────────────────────────────────
+    activeTab: 'dashboard',
+    tabs: [
+      { id: 'dashboard', label: 'Dashboard' },
+      { id: 'jobs',      label: 'Jobs' },
+      { id: 'benchmark', label: 'Benchmark' },
+      { id: 'listings',  label: 'Listings' },
+    ],
+
+    stats: {},
+    jobs: [],
+    engines: [],
+    availableSites: ['vinted', 'ebay', 'depop'],
+    wsConnected: false,
+
+    // Job form
+    showJobForm: false,
+    editingJob: null,
+    jobForm: { search_term: '', engine: 'playwright', sites: ['vinted', 'ebay', 'depop'] },
+
+    // Benchmark
+    benchQuery: 'vintage jacket',
+    benchEngines: ['playwright', 'beautifulsoup'],
+    benchSites: ['vinted', 'ebay', 'depop'],
+    benchRunning: false,
+    benchResults: [],
+
+    // Listings
+    listings: [],
+    listingsTotal: 0,
+    listingsOffset: 0,
+    listingsLimit: 40,
+    listingsFilter: { site: '', job_id: '', min_price: null, max_price: null, sort: 'newest' },
+
+    // Toast
+    toast: { show: false, message: '', type: 'success' },
+
+    // ── Init ──────────────────────────────────────────────────────────────
+    async init() {
+      await Promise.all([this.loadStats(), this.loadJobs(), this.loadEngines()]);
+      this.connectWS();
+      setInterval(() => this.loadStats(), 30000);
+    },
+
+    // ── API helpers ───────────────────────────────────────────────────────
+    async api(method, path, body) {
+      const opts = { method, headers: { 'Content-Type': 'application/json' } };
+      if (body) opts.body = JSON.stringify(body);
+      const res = await fetch('/api' + path, opts);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || res.statusText);
+      }
+      if (res.status === 204) return null;
+      return res.json();
+    },
+
+    // ── Data loaders ──────────────────────────────────────────────────────
+    async loadStats() {
+      try { this.stats = await this.api('GET', '/stats'); } catch {}
+    },
+    async loadJobs() {
+      try { this.jobs = await this.api('GET', '/jobs'); } catch {}
+    },
+    async loadEngines() {
+      try {
+        const data = await this.api('GET', '/engines');
+        this.engines = data.engines;
+        if (this.engines.length) this.jobForm.engine = this.engines[0].id;
+      } catch {}
+    },
+    async loadListings() {
+      try {
+        const f = this.listingsFilter;
+        const params = new URLSearchParams({ sort: f.sort, limit: this.listingsLimit, offset: this.listingsOffset });
+        if (f.site)      params.set('site', f.site);
+        if (f.job_id)    params.set('job_id', f.job_id);
+        if (f.min_price) params.set('min_price', f.min_price);
+        if (f.max_price) params.set('max_price', f.max_price);
+        const data = await this.api('GET', '/listings?' + params);
+        this.listings = data.listings;
+        this.listingsTotal = data.total;
+      } catch (e) { this.showToast('Failed to load listings: ' + e.message, 'error'); }
+    },
+
+    // ── Jobs ──────────────────────────────────────────────────────────────
+    get statCards() {
+      return [
+        { label: 'Active Jobs',      value: this.stats.active_jobs ?? '—' },
+        { label: 'Listings Today',   value: this.stats.listings_today ?? '—' },
+        { label: 'New (last hour)',   value: this.stats.new_last_hour ?? '—' },
+        { label: 'Errors Today',     value: this.stats.errors_today ?? '—' },
+      ];
+    },
+
+    async submitJob() {
+      try {
+        if (this.editingJob) {
+          await this.api('PUT', `/jobs/${this.editingJob.id}`, this.jobForm);
+          this.showToast('Job updated');
+        } else {
+          await this.api('POST', '/jobs', this.jobForm);
+          this.showToast('Job created');
+        }
+        await this.loadJobs();
+        this.cancelJobForm();
+      } catch (e) { this.showToast(e.message, 'error'); }
+    },
+
+    editJob(job) {
+      this.editingJob = job;
+      this.jobForm = { search_term: job.search_term, engine: job.engine, sites: [...job.sites] };
+      this.showJobForm = true;
+    },
+
+    cancelJobForm() {
+      this.showJobForm = false;
+      this.editingJob = null;
+      this.jobForm = { search_term: '', engine: this.engines[0]?.id || 'playwright', sites: ['vinted', 'ebay', 'depop'] };
+    },
+
+    async toggleJob(job) {
+      try {
+        await this.api('PUT', `/jobs/${job.id}`, { active: !job.active });
+        job.active = !job.active;
+      } catch (e) { this.showToast(e.message, 'error'); }
+    },
+
+    async deleteJob(id) {
+      if (!confirm('Delete this job and all its listings?')) return;
+      try {
+        await this.api('DELETE', `/jobs/${id}`);
+        this.jobs = this.jobs.filter(j => j.id !== id);
+        this.showToast('Job deleted');
+      } catch (e) { this.showToast(e.message, 'error'); }
+    },
+
+    async triggerJob(id) {
+      try {
+        await this.api('POST', `/jobs/${id}/run`);
+        this.showToast('Job triggered — check results in a moment');
+      } catch (e) { this.showToast(e.message, 'error'); }
+    },
+
+    // ── Benchmark ─────────────────────────────────────────────────────────
+    async runBenchmark() {
+      this.benchRunning = true;
+      this.benchResults = [];
+      try {
+        const data = await this.api('POST', '/benchmark', {
+          search_term: this.benchQuery,
+          engines: this.benchEngines,
+          sites: this.benchSites,
+        });
+        this.benchResults = this._markWinners(data.results);
+      } catch (e) {
+        this.showToast('Benchmark failed: ' + e.message, 'error');
+      } finally {
+        this.benchRunning = false;
+      }
+    },
+
+    _markWinners(results) {
+      // Per site: mark the engine with most items_found & success as winner
+      const bySite = {};
+      for (const r of results) {
+        if (!r.success) continue;
+        if (!bySite[r.site] || (r.items_found > bySite[r.site].items_found)) {
+          bySite[r.site] = r;
+        }
+      }
+      return results.map(r => ({ ...r, _winner: bySite[r.site] === r }));
+    },
+
+    // ── WebSocket ─────────────────────────────────────────────────────────
+    connectWS() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(`${proto}://${location.host}/ws`);
+      ws.onopen = () => { this.wsConnected = true; };
+      ws.onclose = () => { this.wsConnected = false; setTimeout(() => this.connectWS(), 5000); };
+      ws.onmessage = (evt) => {
+        const event = JSON.parse(evt.data);
+        if (event.type === 'new_listings') {
+          this.showToast(`+${event.count} new listings on ${event.site}`);
+          this.loadStats();
+        }
+      };
+      setInterval(() => ws.readyState === 1 && ws.send('ping'), 20000);
+    },
+
+    // ── Utilities ─────────────────────────────────────────────────────────
+    relativeTime(isoStr) {
+      if (!isoStr) return '—';
+      const diff = Date.now() - new Date(isoStr + (isoStr.endsWith('Z') ? '' : 'Z')).getTime();
+      if (diff < 60000)  return 'just now';
+      if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+      if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+      return Math.floor(diff / 86400000) + 'd ago';
+    },
+
+    showToast(message, type = 'success') {
+      this.toast = { show: true, message, type };
+      setTimeout(() => this.toast.show = false, 4000);
+    },
+  };
+}
+</script>
+</body>
+</html>

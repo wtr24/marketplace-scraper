@@ -1,0 +1,43 @@
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Git SHA to rollback to (e.g. abc1234)'
+        required: true
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rollback on NAS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.NAS_HOST }}
+          username: admin
+          key: ${{ secrets.NAS_SSH_KEY }}
+          script: |
+            cd /volume1/docker/marketplace-scraper
+            sed -i "s|:latest|:sha-${{ github.event.inputs.sha }}|g" docker-compose.yml
+            docker compose pull
+            docker compose up -d
+            sleep 15
+            curl -sf http://localhost:3001/api/health || exit 1
+            sed -i "s|:sha-[a-f0-9]*|:latest|g" docker-compose.yml
+
+      - name: Discord Notification
+        if: always()
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          STATUS="${{ job.status }}"
+          COLOR=$([[ "$STATUS" == "success" ]] && echo "16776960" || echo "15158332")
+          curl -s -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{\"embeds\":[{
+              \"title\":\"⏪ Marketplace Scraper — Rollback $STATUS\",
+              \"description\":\"Rolled back to SHA: \`${{ github.event.inputs.sha }}\`\",
+              \"color\":$COLOR,
+              \"footer\":{\"text\":\"wtr24/marketplace-scraper\"}
+            }]}"
