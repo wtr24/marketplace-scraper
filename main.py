@@ -249,6 +249,7 @@ async def run_benchmark(body: BenchmarkRequest):
     async def _run_single(engine_name, site):
         engine = get_engine(engine_name)
         result = await engine.scrape(site, body.search_term)
+        items_new = await db.upsert_listings(result.listings, job_id=None)
         r = await db.save_scraper_result({
             "job_id": None,
             "engine": engine_name,
@@ -256,7 +257,7 @@ async def run_benchmark(body: BenchmarkRequest):
             "run_at": datetime.utcnow(),
             "duration_ms": result.duration_ms,
             "items_found": len(result.listings),
-            "items_new": 0,
+            "items_new": items_new,
             "success": result.success,
             "error_message": result.error_message,
             "memory_mb": result.memory_mb,

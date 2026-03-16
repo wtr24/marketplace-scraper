@@ -35,6 +35,11 @@ class PlaywrightScraper(BaseScraper):
     async def _run(self, site: str, search_term: str) -> list[dict[str, Any]]:
         from playwright.async_api import async_playwright
 
+        # Depop: use JSON API — DOM scraping unreliable due to React SSR changes
+        if site == "depop":
+            site_mod = get_site(site)
+            return await self._fetch_depop_api(search_term, site_mod)
+
         site_mod = get_site(site)
         url = site_mod.build_url(search_term)
 
@@ -76,12 +81,16 @@ class PlaywrightScraper(BaseScraper):
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 await random_delay(2, 5)
 
+                # eBay bot-challenge detection
+                if site == "ebay":
+                    final_url = page.url
+                    if any(k in final_url for k in ("splashui", "/challenge", "bot", "captcha")):
+                        raise RuntimeError(f"eBay bot challenge detected — redirected to {final_url}")
+
                 if site == "vinted":
                     return await self._scrape_vinted(page, site_mod)
                 elif site == "ebay":
                     return await self._scrape_ebay(page, site_mod)
-                elif site == "depop":
-                    return await self._scrape_depop(page, site_mod)
                 else:
                     raise ValueError(f"Unknown site: {site}")
             finally:
@@ -175,43 +184,34 @@ class PlaywrightScraper(BaseScraper):
         logger.info(f"[playwright/ebay] found {len(listings)} listings")
         return listings
 
-    # ─── Depop ──────────────────────────────────────────────────────────────
+    # ─── Depop JSON API ─────────────────────────────────────────────────────
 
-    async def _scrape_depop(self, page, site_mod) -> list[dict[str, Any]]:
-        sel = site_mod.SELECTORS
+    async def _fetch_depop_api(self, search_term: str, site_mod) -> list[dict[str, Any]]:
+        import httpx
+        from urllib.parse import quote_plus
+        from scrapers.base import random_user_agent
 
-        try:
-            await page.wait_for_selector(sel["product_card"], timeout=20000)
-        except Exception:
-            logger.warning("[playwright/depop] product_card timeout")
-            return []
+        url = (
+            f"https://webapi.depop.com/api/v2/search/products/"
+            f"?q={quote_plus(search_term)}&sort=newlyListed&limit=48&country=gb&currency=GBP"
+        )
+        headers = {
+            "Accept": "application/json",
+            "Accept-Language": "en-GB,en;q=0.9",
+            "depop-country-code": "GB",
+            "depop-currency-code": "GBP",
+            "Origin": "https://www.depop.com",
+            "Referer": "https://www.depop.com/",
+            "User-Agent": random_user_agent(),
+        }
+        await random_delay(1, 3)
+        async with httpx.AsyncClient(follow_redirects=True, timeout=20, headers=headers) as client:
+            logger.info(f"[playwright/depop] Fetching API: {url}")
+            response = await client.get(url)
+            response.raise_for_status()
 
-        # Scroll to trigger lazy loading
-        for _ in range(3):
-            await page.evaluate("window.scrollBy(0, 800)")
-            await random_delay(0.5, 1.5)
-
-        items = await page.query_selector_all(sel["product_card"])
-        listings = []
-        for item in items:
-            try:
-                raw = {}
-                title_el = await item.query_selector(sel["title"])
-                price_el = await item.query_selector(sel["price"])
-                image_el = await item.query_selector(sel["image"])
-                link_el = await item.query_selector(sel["link"])
-                seller_el = await item.query_selector(sel["seller"])
-
-                raw["title"] = await title_el.inner_text() if title_el else ""
-                raw["price"] = await price_el.inner_text() if price_el else ""
-                raw["image_url"] = await image_el.get_attribute("src") if image_el else ""
-                href = await link_el.get_attribute("href") if link_el else ""
-                raw["url"] = "https://www.depop.com" + href if href and not href.startswith("http") else href
-                raw["seller"] = await seller_el.inner_text() if seller_el else ""
-
-                listings.append(site_mod.normalise(raw))
-            except Exception as e:
-                logger.debug(f"[playwright/depop] item parse error: {e}")
-
-        logger.info(f"[playwright/depop] found {len(listings)} listings")
+        data = response.json()
+        products = data.get("products", [])
+        listings = [site_mod.normalise(p) for p in products]
+        logger.info(f"[playwright/depop] API returned {len(listings)} listings")
         return listings

@@ -79,7 +79,7 @@
             <span class="text-xs px-2 py-0.5 rounded text-white"
                   :class="'site-' + l.site"
                   x-text="l.site"></span>
-            <a v-if="l.listing_url" :href="l.listing_url" target="_blank"
+            <a x-show="l.listing_url" :href="l.listing_url" target="_blank"
                class="text-xs text-indigo-400 hover:underline">View →</a>
           </div>
         </div>

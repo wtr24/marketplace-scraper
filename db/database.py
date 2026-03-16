@@ -110,6 +110,9 @@ class Database:
         new_count = 0
         async with self.SessionLocal() as session:
             for item in listings:
+                # Skip rows with no listing_id — they'd all conflict on the same dedup key
+                if not item.get("listing_id"):
+                    continue
                 stmt = sqlite_insert(Listing).values(
                     job_id=job_id,
                     site=item.get("site"),
