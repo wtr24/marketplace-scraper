@@ -1,28 +1,19 @@
-FROM python:3.12-slim
+# Official Playwright Python image — Ubuntu 22.04 (jammy) with Chromium pre-installed.
+# Eliminates all "unsupported OS" apt failures from python:slim-based builds.
+FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy
+
 WORKDIR /app
 
-# System libraries needed by Playwright's bundled Chromium + runtime tools.
-# curl is needed for the HEALTHCHECK.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    gcc \
-    nodejs \
-    npm \
-    && rm -rf /var/lib/apt/lists/*
-
-# Optional: Puppeteer stealth plugin (Node engine)
+# Optional: Puppeteer stealth plugin (Node engine — node/npm included in base image)
 RUN npm install -g puppeteer-extra puppeteer-extra-plugin-stealth 2>/dev/null || true
 
 # Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright's bundled Chromium.
-# Run apt-get update HERE (fresh) so --with-deps can install its own system libs.
+# Playwright browsers already installed in base image at /ms-playwright —
+# no `playwright install` step needed.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN apt-get update \
-    && playwright install chromium --with-deps \
-    && rm -rf /var/lib/apt/lists/*
 
 # Copy application source
 COPY . .
