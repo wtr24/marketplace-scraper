@@ -43,7 +43,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and push
+      - name: Build and push scraper
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -52,8 +52,20 @@ jobs:
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/marketplace-scraper:latest
             ${{ secrets.DOCKER_USERNAME }}/marketplace-scraper:sha-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=scraper
+          cache-to: type=gha,mode=max,scope=scraper
+
+      - name: Build and push nginx
+        uses: docker/build-push-action@v5
+        with:
+          context: ./nginx
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/marketplace-scraper-nginx:latest
+            ${{ secrets.DOCKER_USERNAME }}/marketplace-scraper-nginx:sha-${{ github.sha }}
+          cache-from: type=gha,scope=nginx
+          cache-to: type=gha,mode=max,scope=nginx
 
       - name: Deploy to NAS
         uses: appleboy/ssh-action@v1
@@ -66,7 +78,7 @@ jobs:
             docker compose pull
             docker compose up -d
             sleep 15
-            curl -sf http://localhost:3001/api/health || exit 1
+            curl -sf http://localhost:3003/api/health || exit 1
 
       - name: Discord Notification
         if: always()
@@ -82,5 +94,5 @@ jobs:
               \"title\":\"$ICON Marketplace Scraper — Deploy $STATUS\",
               \"description\":\"**Commit:** ${{ github.event.head_commit.message }}\n**Branch:** ${{ github.ref_name }}\n**SHA:** \`${{ github.sha }}\`\",
               \"color\":$COLOR,
-              \"footer\":{\"text\":\"wtr24/marketplace-scraper\"}
+              \"footer\":{\"text\":\"wtr24/marketplace-scraper · http://192.168.0.18:3003\"}
             }]}"

@@ -23,7 +23,7 @@ jobs:
             docker compose pull
             docker compose up -d
             sleep 15
-            curl -sf http://localhost:3001/api/health || exit 1
+            curl -sf http://localhost:3003/api/health || exit 1
             sed -i "s|:sha-[a-f0-9]*|:latest|g" docker-compose.yml
 
       - name: Discord Notification

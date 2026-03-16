@@ -7,11 +7,11 @@ services:
     labels:
       - com.centurylinklabs.watchtower.enable=true
     restart: unless-stopped
-    ports:
-      - "3001:3000"
+    expose:
+      - "3000"           # internal only — nginx proxies to this
     volumes:
-      - ./data:/data          # SQLite database persistence
-      - ./logs:/app/logs      # Application logs
+      - ./data:/data
+      - ./logs:/app/logs
     environment:
       - DATABASE_URL=sqlite:////data/scraper.db
       - PORT=3000
@@ -19,9 +19,9 @@ services:
       - TZ=Europe/London
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-    mem_limit: 2g             # Playwright is memory-hungry
+    mem_limit: 2g
     cpus: '2.0'
-    shm_size: '256mb'         # Required for Chromium in Docker
+    shm_size: '256mb'
     security_opt:
       - no-new-privileges:true
     healthcheck:
@@ -31,6 +31,17 @@ services:
       retries: 3
       start_period: 20s
 
+  nginx:
+    image: wtr24dev/marketplace-scraper-nginx:latest
+    container_name: marketplace-scraper-nginx
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+    ports:
+      - "3003:80"
+    depends_on:
+      - scraper
+    restart: unless-stopped
+
   watchtower:
     image: containrrr/watchtower
     command: --interval 30 --cleanup --label-enable
@@ -38,11 +49,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
-  # Optional: swap SQLite for Postgres on a more capable NAS
+  # Optional: swap SQLite for Postgres
   # postgres:
   #   image: postgres:16-alpine
-  #   container_name: scraper-postgres
-  #   restart: unless-stopped
   #   environment:
   #     POSTGRES_USER: scraper
   #     POSTGRES_PASSWORD: scraper

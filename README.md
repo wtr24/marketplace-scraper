@@ -48,14 +48,16 @@ cd /volume1/docker/marketplace-scraper
 docker compose up -d
 
 # 4. Open the UI
-# http://192.168.0.18:3001
+# http://192.168.0.18:3003
 ```
 
 ### Build locally
 
 ```bash
 docker build -t marketplace-scraper .
-docker run -p 3001:3000 -v $(pwd)/data:/data marketplace-scraper
+docker run -p 3000:3000 -v $(pwd)/data:/data marketplace-scraper
+# or with nginx:
+docker compose up -d   # nginx on http://localhost:3003
 ```
 
 ---
@@ -63,8 +65,11 @@ docker run -p 3001:3000 -v $(pwd)/data:/data marketplace-scraper
 ## Architecture
 
 ```
-UI (port 3000)
-  └── FastAPI (REST + WebSocket)
+nginx (port 3003, external)
+  └── proxy_pass → FastAPI (port 3000, internal)
+        ├── Static UI  ← ui/index.html
+        ├── REST API   ← /api/*
+        ├── WebSocket  ← /ws
         ├── APScheduler (every 5 min)
         │     └── Scraper Engine Registry
         │           ├── Playwright  ← primary (Vinted, Depop)
@@ -169,7 +174,7 @@ DATABASE_URL=postgresql://user:pass@host:5432/dbname
 
 ## NAS Deployment
 
-NAS IP: `192.168.0.18` — UI at `http://192.168.0.18:3001`
+NAS IP: `192.168.0.18` — UI at `http://192.168.0.18:3003` (nginx → scraper:3000)
 
 ```bash
 # First-time setup on NAS
@@ -220,6 +225,9 @@ marketplace-scraper/
 ├── db/
 │   ├── models.py              # SQLAlchemy ORM models
 │   └── database.py            # Async DB operations
+├── nginx/
+│   ├── Dockerfile             # nginx:alpine + config
+│   └── nginx.conf             # Proxy to scraper:3000, WebSocket upgrade
 ├── ui/index.html              # Single-file management UI
 ├── tests/
 │   ├── test_sites.py
