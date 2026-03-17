@@ -1,4 +1,5 @@
 """Playwright scraper — primary engine for JS-heavy sites."""
+import asyncio
 import json
 import logging
 import re
@@ -35,11 +36,6 @@ class PlaywrightScraper(BaseScraper):
 
     async def _run(self, site: str, search_term: str) -> list[dict[str, Any]]:
         from playwright.async_api import async_playwright
-
-        # Depop: use JSON API — DOM scraping unreliable due to React SSR changes
-        if site == "depop":
-            site_mod = get_site(site)
-            return await self._fetch_depop_api(search_term, site_mod)
 
         site_mod = get_site(site)
         url = site_mod.build_url(search_term)
@@ -92,6 +88,8 @@ class PlaywrightScraper(BaseScraper):
                     return await self._scrape_vinted(page, site_mod)
                 elif site == "ebay":
                     return await self._scrape_ebay(page, site_mod)
+                elif site == "depop":
+                    return await self._scrape_depop(page, site_mod)
                 else:
                     raise ValueError(f"Unknown site: {site}")
             finally:
@@ -240,34 +238,92 @@ class PlaywrightScraper(BaseScraper):
         logger.info(f"[playwright/ebay] found {len(listings)} listings")
         return listings
 
-    # ─── Depop JSON API ─────────────────────────────────────────────────────
+    # ─── Depop two-phase scraper ─────────────────────────────────────────────
+    # Phase 1: search page → extract product URLs + basic data (price/size/brand)
+    # Phase 2: visit each product page concurrently → extract ld+json (title/description/etc.)
+    # Reason: Depop search results intentionally omit titles; raw HTTP requests are 403'd;
+    # browser fetch is blocked by Transcend airgap.js consent layer.
+    # ld+json on product pages provides reliable structured data (schema.org/Product).
 
-    async def _fetch_depop_api(self, search_term: str, site_mod) -> list[dict[str, Any]]:
-        import httpx
-        from urllib.parse import quote_plus
-        from scrapers.base import random_user_agent
+    async def _scrape_depop(self, page, site_mod) -> list[dict[str, Any]]:
+        # Phase 1: wait for product links and extract basic data
+        try:
+            await page.wait_for_selector("ul > li a[href*='/products/']", timeout=15000)
+        except Exception:
+            logger.warning("[playwright/depop] product link selector timeout — possibly blocked")
+            return []
 
-        url = (
-            f"https://webapi.depop.com/api/v2/search/products/"
-            f"?q={quote_plus(search_term)}&sort=newlyListed&limit=48&country=gb&currency=GBP"
+        await random_delay(1, 2)
+
+        items_basic = await page.evaluate("""() => {
+            const items = [];
+            document.querySelectorAll('ul > li').forEach(li => {
+                const link = li.querySelector('a[href*="/products/"]');
+                if (!link) return;
+                const paras = li.querySelectorAll('p');
+                const img = li.querySelector('img');
+                items.push({
+                    url: link.href,
+                    price: paras[0]?.textContent?.trim() || '',
+                    size: paras[1]?.textContent?.trim() || '',
+                    brand: paras[2]?.textContent?.trim() || '',
+                    image_url: img?.src || img?.dataset?.src || '',
+                });
+            });
+            return items.filter(x => x.url.includes('/products/'));
+        }""")
+
+        logger.info(f"[playwright/depop] Found {len(items_basic)} product links on search page")
+        if not items_basic:
+            return []
+
+        # Phase 2: visit each product page concurrently and extract ld+json
+        context = page.context
+        sem = asyncio.Semaphore(4)
+
+        async def _fetch_one(item):
+            async with sem:
+                prod_page = await context.new_page()
+                try:
+                    await prod_page.goto(item["url"], wait_until="domcontentloaded", timeout=20000)
+                    ld = await prod_page.evaluate("""() => {
+                        const el = document.querySelector('script[type="application/ld+json"]');
+                        if (!el) return null;
+                        try { return JSON.parse(el.textContent); } catch(e) { return null; }
+                    }""")
+                    if not ld:
+                        logger.debug(f"[playwright/depop] no ld+json at {item['url']}, using basic data")
+                        return item
+                    offers = ld.get("offers") or {}
+                    brand = ld.get("brand") or {}
+                    images = ld.get("image") or []
+                    return {
+                        "url": item["url"],
+                        "title": ld.get("name", "").strip(),
+                        "description": ld.get("description", "").strip(),
+                        "price": offers.get("price") or item.get("price", ""),
+                        "currency": offers.get("priceCurrency", "GBP"),
+                        "brand": (brand.get("name") if isinstance(brand, dict) else brand) or item.get("brand", ""),
+                        "image_url": images[0] if images else item.get("image_url", ""),
+                        "condition": offers.get("itemCondition", ""),
+                        "size": item.get("size", ""),
+                    }
+                except Exception as e:
+                    logger.debug(f"[playwright/depop] product page error {item['url']}: {e}")
+                    return item
+                finally:
+                    await prod_page.close()
+
+        results = await asyncio.gather(
+            *[_fetch_one(i) for i in items_basic[:24]],
+            return_exceptions=True,
         )
-        headers = {
-            "Accept": "application/json",
-            "Accept-Language": "en-GB,en;q=0.9",
-            "depop-country-code": "GB",
-            "depop-currency-code": "GBP",
-            "Origin": "https://www.depop.com",
-            "Referer": "https://www.depop.com/",
-            "User-Agent": random_user_agent(),
-        }
-        await random_delay(1, 3)
-        async with httpx.AsyncClient(follow_redirects=True, timeout=20, headers=headers) as client:
-            logger.info(f"[playwright/depop] Fetching API: {url}")
-            response = await client.get(url)
-            response.raise_for_status()
 
-        data = response.json()
-        products = data.get("products", [])
-        listings = [site_mod.normalise(p) for p in products]
-        logger.info(f"[playwright/depop] API returned {len(listings)} listings")
+        listings = []
+        for r in results:
+            if isinstance(r, Exception) or not r:
+                continue
+            listings.append(site_mod.normalise(r))
+
+        logger.info(f"[playwright/depop] Scraped {len(listings)} listings with full data")
         return listings

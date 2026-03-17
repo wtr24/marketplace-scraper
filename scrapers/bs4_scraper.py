@@ -60,9 +60,10 @@ class BS4Scraper(BaseScraper):
     async def _run(self, site: str, search_term: str) -> list[dict[str, Any]]:
         site_mod = get_site(site)
 
-        # Depop: always use JSON API — DOM scraping returns 403
+        # Depop: requires a real browser (JS-rendered, 403 on raw HTTP).
+        # Use the Playwright scraper for Depop instead.
         if site == "depop":
-            return await self._fetch_depop_api(search_term, site_mod)
+            raise RuntimeError("Depop requires Playwright (JS-rendered, raw HTTP 403). Use playwright engine.")
 
         url = site_mod.build_url(search_term)
         headers = EBAY_HEADERS if site == "ebay" else random_headers()
