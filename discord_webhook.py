@@ -82,14 +82,14 @@ def _build_embed(listing: dict) -> dict:
             "name": f"{platform_icon}  New fleece detected on {platform_label}",
         },
         "title": title[:256],
-        "description": desc or None,
         "fields": fields,
         "footer": {
             "text": "Marketplace Scraper  •  Fleece Alert",
-            "icon_url": "https://i.imgur.com/AfFp7pu.png",
         },
-        "timestamp": None,  # filled below
     }
+
+    if desc:
+        embed["description"] = desc
 
     if url:
         embed["url"] = url
@@ -97,13 +97,14 @@ def _build_embed(listing: dict) -> dict:
     if listing.get("image_url"):
         embed["thumbnail"] = {"url": listing["image_url"]}
 
-    # Timestamp (ISO 8601 with Z suffix — required by Discord)
+    # Timestamp — Discord requires ISO 8601 with Z, omit entirely if unavailable
     scraped = listing.get("scraped_at")
     if scraped:
         ts = str(scraped)
-        embed["timestamp"] = ts.replace("+00:00", "Z") if ts.endswith("+00:00") else (
-            ts if ts.endswith("Z") else ts + "Z"
-        )
+        ts = ts.replace("+00:00", "Z")
+        if not ts.endswith("Z"):
+            ts += "Z"
+        embed["timestamp"] = ts
 
     return embed
 
@@ -136,6 +137,39 @@ async def send_fleece_alert(listing: dict, webhook_url: str) -> bool:
     except Exception as exc:
         logger.error(f"[discord] Failed to send alert: {exc}")
         return False
+
+
+async def get_webhook_url(db=None) -> Optional[str]:
+    """Return webhook URL: DB setting → DISCORD_WEBHOOK_URL env var → None."""
+    if db is not None:
+        try:
+            url = await db.get_setting("discord_webhook_url")
+            if url and url.strip():
+                return url.strip()
+        except Exception:
+            pass
+    return os.getenv("DISCORD_WEBHOOK_URL", "").strip() or None
+
+
+async def send_test_alert(webhook_url: str) -> tuple[bool, str]:
+    """Send a test embed. Returns (success, message)."""
+    from datetime import datetime, timezone
+    test_listing = {
+        "site": "vinted",
+        "title": "Patagonia Synchilla Snap-T Fleece Pullover — Test Alert",
+        "description": "This is a test notification from Marketplace Scraper. If you see this, your Discord webhook is working correctly.",
+        "price": 42.00,
+        "currency": "GBP",
+        "size": "M",
+        "condition": "Good",
+        "brand": "Patagonia",
+        "seller": "marketplace_scraper",
+        "image_url": "https://i.imgur.com/AfFp7pu.png",
+        "listing_url": None,
+        "scraped_at": datetime.now(timezone.utc).isoformat(),
+    }
+    ok = await send_fleece_alert(test_listing, webhook_url)
+    return ok, ("Test alert sent successfully" if ok else "Failed — check logs for details")
 
 
 async def send_fleece_alerts(new_listings: list[dict], webhook_url: Optional[str]) -> int:

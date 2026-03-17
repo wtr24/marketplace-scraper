@@ -10,6 +10,14 @@ class Base(DeclarativeBase):
     pass
 
 
+class AppConfig(Base):
+    __tablename__ = "app_config"
+
+    key   = Column(String, primary_key=True)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Job(Base):
     __tablename__ = "jobs"
 

@@ -98,9 +98,9 @@ async def _run_all_active_jobs():
 
 async def _execute_job(job):
     from scrapers import get_engine
-    from discord_webhook import send_fleece_alerts
+    from discord_webhook import send_fleece_alerts, get_webhook_url
 
-    discord_url = os.getenv("DISCORD_WEBHOOK_URL")
+    discord_url = await get_webhook_url(_db)
 
     sites = json.loads(job.sites) if isinstance(job.sites, str) else job.sites
     engine = get_engine(job.engine)

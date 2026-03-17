@@ -252,7 +252,7 @@ async def run_benchmark(body: BenchmarkRequest):
     async def _run_single(engine_name, site):
         engine = get_engine(engine_name)
         result = await engine.scrape(site, body.search_term)
-        items_new = await db.upsert_listings(result.listings, job_id=None)
+        items_new, _ = await db.upsert_listings(result.listings, job_id=None)
         r = await db.save_scraper_result({
             "job_id": None,
             "engine": engine_name,
@@ -310,6 +310,40 @@ async def list_engines():
 @app.get("/api/sites")
 async def list_sites():
     return {"sites": SUPPORTED_SITES}
+
+
+# ─── Settings ────────────────────────────────────────────────────────────────
+
+class SettingsUpdate(BaseModel):
+    discord_webhook_url: Optional[str] = None
+
+
+@app.get("/api/settings")
+async def get_settings():
+    url = await db.get_setting("discord_webhook_url")
+    return {
+        "discord_webhook_url": url or "",
+        "discord_configured": bool(url and url.strip()),
+    }
+
+
+@app.put("/api/settings")
+async def update_settings(body: SettingsUpdate):
+    if body.discord_webhook_url is not None:
+        await db.set_setting("discord_webhook_url", body.discord_webhook_url.strip())
+    return {"message": "Settings saved"}
+
+
+@app.post("/api/discord/test")
+async def test_discord():
+    from discord_webhook import get_webhook_url, send_test_alert
+    url = await get_webhook_url(db)
+    if not url:
+        raise HTTPException(status_code=400, detail="No Discord webhook URL configured")
+    ok, message = await send_test_alert(url)
+    if not ok:
+        raise HTTPException(status_code=502, detail=message)
+    return {"message": message}
 
 
 # ─── WebSocket ───────────────────────────────────────────────────────────────

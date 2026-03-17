@@ -10,7 +10,7 @@ from sqlalchemy import select, func, desc, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from db.models import Base, Job, Listing, ScraperResult
+from db.models import Base, Job, Listing, ScraperResult, AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,20 @@ class Database:
                 await conn.execute(text("ALTER TABLE jobs ADD COLUMN interval_minutes INTEGER DEFAULT 60"))
             except Exception:
                 pass  # column already exists
+        # Seed default config from env if not already stored
+        await self._seed_default_config()
         logger.info("Database initialised")
+
+    async def _seed_default_config(self):
+        """Write env-provided defaults into app_config on first run (won't overwrite)."""
+        import os
+        env_url = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
+        if env_url:
+            async with self.SessionLocal() as session:
+                existing = await session.get(AppConfig, "discord_webhook_url")
+                if not existing:
+                    session.add(AppConfig(key="discord_webhook_url", value=env_url))
+                    await session.commit()
 
     async def close(self):
         await self.engine.dispose()
@@ -271,3 +284,19 @@ class Database:
                 "errors_today": recent_errors,
                 "recent_listings": recent_listings,
             }
+
+    # ─── App Config ─────────────────────────────────────────────────────────
+
+    async def get_setting(self, key: str) -> Optional[str]:
+        async with self.SessionLocal() as session:
+            row = await session.get(AppConfig, key)
+            return row.value if row else None
+
+    async def set_setting(self, key: str, value: str) -> None:
+        async with self.SessionLocal() as session:
+            row = await session.get(AppConfig, key)
+            if row:
+                row.value = value
+            else:
+                session.add(AppConfig(key=key, value=value))
+            await session.commit()
