@@ -59,17 +59,17 @@ def _parse_price(value: Any) -> Optional[float]:
     return float(match.group()) if match else None
 
 
-# CSS selectors for Playwright / BS4
+# CSS selectors for Playwright — updated for eBay 2025 card redesign
+# eBay migrated from li.s-item to li.s-card with su-* component classes
 SELECTORS = {
-    # Search result items
     "result_list": "ul.srp-results",
-    "item": "li.s-item",
-    "title": ".s-item__title",
-    "price": ".s-item__price",
-    "condition": ".s-item__subtitle .SECONDARY_INFO",
-    "shipping": ".s-item__shipping",
-    "seller": ".s-item__seller-info-text",
-    "link": "a.s-item__link",
-    "image": ".s-item__image-img",
-    "end_time": ".s-item__time-end",
+    "item": "li.s-card",
+    "title": "span.su-styled-text.primary.default",   # leaf span, clean text
+    "price": "span.s-card__price",                    # bold price span
+    "condition": "span.su-styled-text.secondary.default",  # "Brand new" / "Used" etc.
+    "shipping": None,
+    "seller": None,                                   # not shown on new search cards
+    "link": "a[href*='/itm/']",
+    "image": "img.s-card__image",
+    "end_time": None,
 }

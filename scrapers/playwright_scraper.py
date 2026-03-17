@@ -213,22 +213,24 @@ class PlaywrightScraper(BaseScraper):
         for item in items:
             try:
                 raw = {}
-                title_el = await item.query_selector(sel["title"])
-                price_el = await item.query_selector(sel["price"])
-                condition_el = await item.query_selector(sel["condition"])
-                link_el = await item.query_selector(sel["link"])
-                image_el = await item.query_selector(sel["image"])
-                seller_el = await item.query_selector(sel["seller"])
+                title_el = await item.query_selector(sel["title"]) if sel.get("title") else None
+                price_el = await item.query_selector(sel["price"]) if sel.get("price") else None
+                condition_el = await item.query_selector(sel["condition"]) if sel.get("condition") else None
+                link_el = await item.query_selector(sel["link"]) if sel.get("link") else None
+                image_el = await item.query_selector(sel["image"]) if sel.get("image") else None
+                seller_sel = sel.get("seller")
+                seller_el = await item.query_selector(seller_sel) if seller_sel else None
 
-                raw["title"] = await title_el.inner_text() if title_el else ""
-                raw["price"] = await price_el.inner_text() if price_el else ""
-                raw["condition"] = await condition_el.inner_text() if condition_el else ""
+                raw["title"] = (await title_el.inner_text()).strip() if title_el else ""
+                raw["price"] = (await price_el.inner_text()).strip() if price_el else ""
+                raw["condition"] = (await condition_el.inner_text()).strip() if condition_el else ""
                 raw["url"] = await link_el.get_attribute("href") if link_el else ""
                 raw["image_url"] = await image_el.get_attribute("src") if image_el else ""
-                raw["seller"] = await seller_el.inner_text() if seller_el else ""
+                raw["seller"] = (await seller_el.inner_text()).strip() if seller_el else ""
 
-                # Skip promoted / sponsored items with no real URL
-                if not raw.get("url") or "rover.ebay" in raw.get("url", ""):
+                # Skip ads/promos: real UK listings have ebay.co.uk/itm/ URL
+                url = raw.get("url", "")
+                if not url or "/itm/" not in url:
                     continue
 
                 listings.append(site_mod.normalise(raw))
@@ -247,8 +249,9 @@ class PlaywrightScraper(BaseScraper):
 
     async def _scrape_depop(self, page, site_mod) -> list[dict[str, Any]]:
         # Phase 1: wait for product links and extract basic data
+        # Depop product grid is an <ol> (not <ul>) — ul > li returns 0
         try:
-            await page.wait_for_selector("ul > li a[href*='/products/']", timeout=15000)
+            await page.wait_for_selector("ol li a[href*='/products/']", timeout=15000)
         except Exception:
             logger.warning("[playwright/depop] product link selector timeout — possibly blocked")
             return []
@@ -257,7 +260,7 @@ class PlaywrightScraper(BaseScraper):
 
         items_basic = await page.evaluate("""() => {
             const items = [];
-            document.querySelectorAll('ul > li').forEach(li => {
+            document.querySelectorAll('ol li').forEach(li => {
                 const link = li.querySelector('a[href*="/products/"]');
                 if (!link) return;
                 const paras = li.querySelectorAll('p');
