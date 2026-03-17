@@ -135,6 +135,7 @@ class PlaywrightScraper(BaseScraper):
                             raw = {
                                 "listing_id": str(item.get("id", "")),
                                 "title": item.get("title", ""),
+                                "description": item.get("description", ""),
                                 "price": price_info.get("amount", ""),
                                 "size": item.get("size_title", ""),
                                 "condition": item.get("status", ""),

@@ -33,6 +33,11 @@ class Database:
     async def init(self):
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # Migrate: add description column for existing databases
+            try:
+                await conn.execute(text("ALTER TABLE listings ADD COLUMN description TEXT"))
+            except Exception:
+                pass  # column already exists
         logger.info("Database initialised")
 
     async def close(self):
@@ -118,6 +123,7 @@ class Database:
                     site=item.get("site"),
                     listing_id=item.get("listing_id"),
                     title=item.get("title"),
+                    description=item.get("description"),
                     price=item.get("price"),
                     currency=item.get("currency", "GBP"),
                     brand=item.get("brand"),

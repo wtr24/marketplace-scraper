@@ -31,15 +31,17 @@ def extract_listing_id(url: str) -> Optional[str]:
 
 def normalise(raw: dict[str, Any]) -> dict[str, Any]:
     url = raw.get("url", raw.get("listing_url", ""))
+    condition = raw.get("condition", "").strip()
     return {
         "site": "ebay",
         "listing_id": raw.get("listing_id") or extract_listing_id(url) or "",
         "title": raw.get("title", "").strip(),
+        "description": condition or None,  # condition text is the closest to a description from search results
         "price": _parse_price(raw.get("price")),
         "currency": raw.get("currency", "GBP"),
-        "brand": None,  # not in search results
+        "brand": None,
         "size": None,
-        "condition": raw.get("condition", "").strip() or None,
+        "condition": condition or None,
         "seller": raw.get("seller", "").strip() or None,
         "image_url": raw.get("image_url", "") or None,
         "listing_url": url or None,

@@ -50,10 +50,12 @@ def normalise(raw: dict[str, Any]) -> dict[str, Any]:
         or raw.get("price")
     )
 
+    desc = (raw.get("description") or raw.get("title") or "").strip()
     return {
         "site": "depop",
         "listing_id": raw.get("id") or raw.get("listing_id") or extract_listing_id(url) or slug,
-        "title": (raw.get("description") or raw.get("title") or "").strip(),
+        "title": desc,
+        "description": desc or None,
         "price": _parse_price(price_amount),
         "currency": price_data.get("currencyName", "GBP"),
         "brand": raw.get("brandName") or raw.get("brand") or None,

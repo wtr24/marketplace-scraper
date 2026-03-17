@@ -43,6 +43,7 @@ class Listing(Base):
     site = Column(String, nullable=False)
     listing_id = Column(String, nullable=False)  # platform-native ID
     title = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
     price = Column(Float, nullable=True)
     currency = Column(String, default="GBP")
     brand = Column(String, nullable=True)
@@ -70,6 +71,7 @@ class Listing(Base):
             "site": self.site,
             "listing_id": self.listing_id,
             "title": self.title,
+            "description": self.description,
             "price": self.price,
             "currency": self.currency,
             "brand": self.brand,

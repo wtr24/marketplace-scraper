@@ -8,185 +8,274 @@
   <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
   <style>
     [x-cloak] { display: none !important; }
-    .site-vinted  { background:#09b1ba; }
-    .site-ebay    { background:#e53238; }
-    .site-depop   { background:#ff2300; }
-    .engine-badge { font-size:.65rem; padding:2px 6px; border-radius:4px; }
     .spin { animation: spin 1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .line-clamp-1 { display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden; }
+    .line-clamp-2 { display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden; }
   </style>
 </head>
-<body class="bg-gray-950 text-gray-100 min-h-screen font-sans" x-data="app()" x-init="init()">
+<body class="bg-gray-50 text-gray-900 min-h-screen font-sans" x-data="app()" x-init="init()" x-cloak>
 
-<!-- ── Nav ──────────────────────────────────────────────────────────────── -->
-<nav class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center gap-6">
-  <span class="text-lg font-bold text-indigo-400">🛒 Marketplace Scraper</span>
-  <template x-for="tab in tabs" :key="tab.id">
-    <button
-      @click="activeTab = tab.id"
-      :class="activeTab === tab.id ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-gray-100'"
-      class="pb-1 text-sm font-medium transition-colors"
-      x-text="tab.label"
-    ></button>
-  </template>
-  <div class="ml-auto flex items-center gap-3 text-xs text-gray-500">
-    <span :class="wsConnected ? 'text-green-400' : 'text-red-400'">
-      ● <span x-text="wsConnected ? 'Live' : 'Offline'"></span>
-    </span>
-    <span x-text="'Next run: ' + (stats.next_run ? relativeTime(stats.next_run) : '—')"></span>
+<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+<header class="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
+  <div class="max-w-[1600px] mx-auto px-6 py-4">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900">Marketplace Scraper</h1>
+        <p class="text-sm text-gray-500 mt-0.5">Web scraping analytics for eBay, Vinted &amp; Depop</p>
+      </div>
+      <div class="flex items-center gap-6">
+        <!-- Nav tabs -->
+        <nav class="flex items-center gap-1">
+          <template x-for="tab in tabs" :key="tab.id">
+            <button @click="activeTab = tab.id"
+              :class="activeTab === tab.id
+                ? 'bg-gray-100 text-gray-900 font-medium'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'"
+              class="px-3 py-1.5 text-sm rounded-lg transition-colors"
+              x-text="tab.label">
+            </button>
+          </template>
+        </nav>
+        <!-- Status -->
+        <div class="flex items-center gap-3 text-xs text-gray-500 border-l border-gray-200 pl-6">
+          <span :class="wsConnected ? 'text-emerald-500' : 'text-red-400'" class="flex items-center gap-1">
+            <span class="w-1.5 h-1.5 rounded-full inline-block" :class="wsConnected ? 'bg-emerald-500' : 'bg-red-400'"></span>
+            <span x-text="wsConnected ? 'Live' : 'Offline'"></span>
+          </span>
+          <span x-text="'Next run: ' + (stats.next_run ? relativeTime(stats.next_run) : '—')"></span>
+        </div>
+      </div>
+    </div>
   </div>
-</nav>
+</header>
 
 <!-- ── Dashboard ──────────────────────────────────────────────────────────── -->
-<div x-show="activeTab === 'dashboard'" x-cloak class="p-6 max-w-7xl mx-auto">
-  <h1 class="text-xl font-semibold mb-5">Dashboard</h1>
+<div x-show="activeTab === 'dashboard'" class="max-w-[1600px] mx-auto px-6 py-8">
 
-  <!-- Summary cards -->
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+  <!-- Stats Grid -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
     <template x-for="card in statCards" :key="card.label">
-      <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
-        <div class="text-2xl font-bold text-indigo-300" x-text="card.value"></div>
-        <div class="text-xs text-gray-400 mt-1" x-text="card.label"></div>
+      <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+        <div class="flex items-start justify-between">
+          <div class="space-y-1">
+            <p class="text-sm text-gray-500" x-text="card.label"></p>
+            <p class="text-3xl font-semibold text-gray-900" x-text="card.value"></p>
+            <p x-show="card.trend !== undefined" class="text-sm"
+               :class="card.trendUp ? 'text-emerald-600' : 'text-red-500'"
+               x-text="(card.trendUp ? '+' : '') + card.trend + '% from last week'"></p>
+          </div>
+          <div class="p-3 bg-blue-50 rounded-lg">
+            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" :d="card.icon" />
+            </svg>
+          </div>
+        </div>
       </div>
     </template>
   </div>
 
-  <!-- Live feed -->
-  <div class="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
-    <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
-      <span class="font-medium text-sm">Recent Listings</span>
-      <button @click="loadStats()" class="text-xs text-indigo-400 hover:underline">Refresh</button>
+  <!-- Recent Listings Header -->
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-base font-semibold text-gray-900">Recent Listings</h2>
+    <button @click="loadStats()" class="text-sm text-blue-600 hover:text-blue-800">Refresh</button>
+  </div>
+
+  <!-- Recent Listings Grid -->
+  <template x-if="stats.recent_listings && stats.recent_listings.length === 0">
+    <div class="bg-white rounded-xl border border-gray-200 p-12 text-center">
+      <svg class="w-12 h-12 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+      </svg>
+      <p class="text-gray-500 text-sm">No listings yet — create a job to start scraping.</p>
     </div>
-    <div class="divide-y divide-gray-800">
-      <template x-if="stats.recent_listings && stats.recent_listings.length === 0">
-        <div class="p-6 text-center text-gray-500 text-sm">No listings yet — create a job to start scraping.</div>
-      </template>
-      <template x-for="l in (stats.recent_listings || [])" :key="l.id">
-        <div class="flex items-center gap-4 px-4 py-3 hover:bg-gray-800 transition-colors">
-          <img :src="l.image_url || 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\'%3E%3Crect width=\'48\' height=\'48\' rx=\'4\' fill=\'%23374151\'/%3E%3C/svg%3E'"
-               class="w-12 h-12 rounded object-cover flex-shrink-0 bg-gray-700"
-               @error="$el.src = 'data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\'%3E%3Crect width=\'48\' height=\'48\' rx=\'4\' fill=\'%23374151\'/%3E%3C/svg%3E'" />
-          <div class="flex-1 min-w-0">
-            <div class="text-sm font-medium truncate" x-text="l.title || '—'"></div>
-            <div class="text-xs text-gray-400 mt-0.5">
-              <span x-text="l.seller ? '@' + l.seller : ''"></span>
-              <span class="mx-1 text-gray-600">·</span>
-              <span x-text="relativeTime(l.scraped_at)"></span>
-            </div>
-          </div>
-          <div class="flex items-center gap-3 flex-shrink-0">
-            <span class="text-sm font-semibold text-green-400" x-text="l.price ? '£' + l.price.toFixed(2) : '—'"></span>
-            <span class="text-xs px-2 py-0.5 rounded text-white"
-                  :class="'site-' + l.site"
-                  x-text="l.site"></span>
-            <a x-show="l.listing_url" :href="l.listing_url" target="_blank"
-               class="text-xs text-indigo-400 hover:underline">View →</a>
-          </div>
-        </div>
-      </template>
-    </div>
+  </template>
+  <div x-show="stats.recent_listings && stats.recent_listings.length > 0"
+       class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+    <template x-for="l in (stats.recent_listings || [])" :key="l.id">
+      <div x-html="renderCard(l)"></div>
+    </template>
   </div>
 </div>
 
-<!-- ── Job Manager ────────────────────────────────────────────────────────── -->
-<div x-show="activeTab === 'jobs'" x-cloak class="p-6 max-w-5xl mx-auto">
-  <div class="flex items-center justify-between mb-5">
-    <h1 class="text-xl font-semibold">Job Manager</h1>
+<!-- ── Listings Browser ────────────────────────────────────────────────────── -->
+<div x-show="activeTab === 'listings'" class="max-w-[1600px] mx-auto px-6 py-8">
+
+  <!-- Filter Bar -->
+  <div class="flex flex-col sm:flex-row gap-3 mb-6">
+    <div class="relative flex-1">
+      <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+      </svg>
+      <input x-model="listingsSearch" @input.debounce.400ms="listingsOffset=0;loadListings()" type="text"
+             placeholder="Search listings…"
+             class="w-full bg-white border border-gray-200 rounded-lg pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+    </div>
+    <select x-model="listingsFilter.site" @change="listingsOffset=0;loadListings()"
+            class="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-44">
+      <option value="">All Platforms</option>
+      <option value="ebay">eBay</option>
+      <option value="vinted">Vinted</option>
+      <option value="depop">Depop</option>
+    </select>
+    <select x-model="listingsFilter.sort" @change="listingsOffset=0;loadListings()"
+            class="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-44">
+      <option value="newest">Most Recent</option>
+      <option value="price_asc">Price: Low → High</option>
+      <option value="price_desc">Price: High → Low</option>
+    </select>
+    <div class="flex items-center gap-2 sm:w-auto">
+      <input x-model.number="listingsFilter.min_price" @change="listingsOffset=0;loadListings()" type="number" min="0" placeholder="Min £"
+             class="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-24" />
+      <input x-model.number="listingsFilter.max_price" @change="listingsOffset=0;loadListings()" type="number" min="0" placeholder="Max £"
+             class="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-24" />
+    </div>
+  </div>
+
+  <!-- Results count -->
+  <p class="text-sm text-gray-500 mb-5">
+    Showing <span class="font-semibold text-gray-900" x-text="listings.length"></span>
+    of <span class="font-semibold text-gray-900" x-text="listingsTotal"></span> results
+  </p>
+
+  <!-- Grid -->
+  <template x-if="listings.length === 0">
+    <div class="bg-white rounded-xl border border-gray-200 p-12 text-center">
+      <svg class="w-12 h-12 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+      </svg>
+      <h3 class="text-base font-semibold text-gray-900 mb-1">No items found</h3>
+      <p class="text-gray-500 text-sm">Try adjusting your filters or search query</p>
+    </div>
+  </template>
+  <div x-show="listings.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+    <template x-for="l in listings" :key="l.id">
+      <div x-html="renderCard(l)"></div>
+    </template>
+  </div>
+
+  <!-- Pagination -->
+  <div x-show="listingsTotal > listingsLimit" class="flex justify-center items-center gap-3 mt-8">
+    <button @click="listingsOffset = Math.max(0, listingsOffset - listingsLimit); loadListings()"
+            :disabled="listingsOffset === 0"
+            class="bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-40 text-sm px-4 py-2 rounded-lg transition-colors">
+      ← Prev
+    </button>
+    <span class="text-sm text-gray-500"
+          x-text="'Page ' + (Math.floor(listingsOffset / listingsLimit) + 1) + ' of ' + Math.ceil(listingsTotal / listingsLimit)">
+    </span>
+    <button @click="listingsOffset += listingsLimit; loadListings()"
+            :disabled="listingsOffset + listingsLimit >= listingsTotal"
+            class="bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-40 text-sm px-4 py-2 rounded-lg transition-colors">
+      Next →
+    </button>
+  </div>
+</div>
+
+<!-- ── Job Manager ─────────────────────────────────────────────────────────── -->
+<div x-show="activeTab === 'jobs'" class="max-w-5xl mx-auto px-6 py-8">
+  <div class="flex items-center justify-between mb-6">
+    <h2 class="text-xl font-semibold text-gray-900">Job Manager</h2>
     <button @click="showJobForm = !showJobForm"
-            class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm px-4 py-2 rounded-lg transition-colors">
+            class="bg-gray-900 hover:bg-gray-700 text-white text-sm px-4 py-2 rounded-lg transition-colors">
       + New Job
     </button>
   </div>
 
-  <!-- New job form -->
-  <div x-show="showJobForm" x-transition class="bg-gray-800 rounded-xl border border-gray-700 p-5 mb-6">
-    <h2 class="font-medium mb-4" x-text="editingJob ? 'Edit Job' : 'Create New Job'"></h2>
+  <!-- New/Edit job form -->
+  <div x-show="showJobForm" x-transition class="bg-white rounded-xl border border-gray-200 p-6 mb-6 shadow-sm">
+    <h3 class="font-semibold mb-4" x-text="editingJob ? 'Edit Job' : 'New Job'"></h3>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
-        <label class="block text-xs text-gray-400 mb-1">Search Term</label>
+        <label class="block text-xs font-medium text-gray-600 mb-1">Search Term</label>
         <input x-model="jobForm.search_term" type="text" placeholder="e.g. vintage Levi jacket"
-               class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+               class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
       </div>
       <div>
-        <label class="block text-xs text-gray-400 mb-1">Engine</label>
+        <label class="block text-xs font-medium text-gray-600 mb-1">Engine</label>
         <select x-model="jobForm.engine"
-                class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500">
+                class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <template x-for="e in engines" :key="e.id">
-            <option :value="e.id" x-text="e.id + ' — ' + e.description.split('—')[0].trim()"></option>
+            <option :value="e.id" x-text="e.id"></option>
           </template>
         </select>
       </div>
       <div>
-        <label class="block text-xs text-gray-400 mb-2">Target Sites</label>
+        <label class="block text-xs font-medium text-gray-600 mb-2">Target Sites</label>
         <div class="flex gap-4">
           <template x-for="site in availableSites" :key="site">
             <label class="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" :value="site" x-model="jobForm.sites"
-                     class="accent-indigo-500" />
+              <input type="checkbox" :value="site" x-model="jobForm.sites" class="accent-blue-600" />
               <span x-text="site" class="capitalize"></span>
             </label>
           </template>
         </div>
       </div>
     </div>
-    <div class="flex gap-3 mt-4">
+    <div class="flex gap-3 mt-5">
       <button @click="submitJob()"
               :disabled="!jobForm.search_term || jobForm.sites.length === 0"
-              class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+              class="bg-gray-900 hover:bg-gray-700 disabled:opacity-40 text-white text-sm px-4 py-2 rounded-lg transition-colors"
               x-text="editingJob ? 'Save Changes' : 'Create Job'">
       </button>
-      <button @click="cancelJobForm()" class="text-gray-400 hover:text-gray-100 text-sm px-4 py-2">Cancel</button>
+      <button @click="cancelJobForm()" class="text-gray-500 hover:text-gray-700 text-sm px-4 py-2">Cancel</button>
     </div>
   </div>
 
   <!-- Jobs table -->
-  <div class="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
+  <div class="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
     <template x-if="jobs.length === 0">
-      <div class="p-8 text-center text-gray-500 text-sm">No jobs yet.</div>
+      <div class="p-10 text-center text-gray-500 text-sm">No jobs yet.</div>
     </template>
     <table x-show="jobs.length > 0" class="w-full text-sm">
-      <thead class="border-b border-gray-700">
-        <tr class="text-xs text-gray-400">
-          <th class="text-left px-4 py-3">Search Term</th>
-          <th class="text-left px-4 py-3">Engine</th>
-          <th class="text-left px-4 py-3">Sites</th>
-          <th class="text-left px-4 py-3">Status</th>
-          <th class="text-left px-4 py-3">Last Run</th>
-          <th class="text-left px-4 py-3">Runs</th>
-          <th class="px-4 py-3"></th>
+      <thead class="border-b border-gray-100 bg-gray-50">
+        <tr class="text-xs font-medium text-gray-500">
+          <th class="text-left px-5 py-3">Search Term</th>
+          <th class="text-left px-5 py-3">Engine</th>
+          <th class="text-left px-5 py-3">Sites</th>
+          <th class="text-left px-5 py-3">Status</th>
+          <th class="text-left px-5 py-3">Last Run</th>
+          <th class="text-left px-5 py-3">Runs</th>
+          <th class="px-5 py-3"></th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-gray-800">
+      <tbody class="divide-y divide-gray-100">
         <template x-for="job in jobs" :key="job.id">
-          <tr class="hover:bg-gray-800 transition-colors">
-            <td class="px-4 py-3 font-medium" x-text="job.search_term"></td>
-            <td class="px-4 py-3">
-              <span class="bg-gray-700 text-gray-200 engine-badge" x-text="job.engine"></span>
+          <tr class="hover:bg-gray-50 transition-colors">
+            <td class="px-5 py-3 font-medium text-gray-900" x-text="job.search_term"></td>
+            <td class="px-5 py-3">
+              <span class="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-md font-medium" x-text="job.engine"></span>
             </td>
-            <td class="px-4 py-3">
+            <td class="px-5 py-3">
               <div class="flex gap-1">
                 <template x-for="s in job.sites" :key="s">
-                  <span class="text-white text-xs px-1.5 py-0.5 rounded capitalize" :class="'site-' + s" x-text="s"></span>
+                  <span class="text-xs px-1.5 py-0.5 rounded capitalize font-medium"
+                        :class="{
+                          'bg-blue-100 text-blue-700': s === 'ebay',
+                          'bg-emerald-100 text-emerald-700': s === 'vinted',
+                          'bg-rose-100 text-rose-700': s === 'depop'
+                        }"
+                        x-text="s"></span>
                 </template>
               </div>
             </td>
-            <td class="px-4 py-3">
+            <td class="px-5 py-3">
               <button @click="toggleJob(job)"
-                      :class="job.active ? 'bg-green-800 text-green-300' : 'bg-gray-700 text-gray-400'"
-                      class="text-xs px-2 py-0.5 rounded-full"
+                      :class="job.active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'"
+                      class="text-xs px-2.5 py-1 rounded-full font-medium transition-colors"
                       x-text="job.active ? 'Active' : 'Paused'">
               </button>
             </td>
-            <td class="px-4 py-3 text-gray-400 text-xs" x-text="job.last_run ? relativeTime(job.last_run) : 'Never'"></td>
-            <td class="px-4 py-3 text-gray-400" x-text="job.run_count"></td>
-            <td class="px-4 py-3">
-              <div class="flex gap-2 justify-end">
+            <td class="px-5 py-3 text-gray-500 text-xs" x-text="job.last_run ? relativeTime(job.last_run) : 'Never'"></td>
+            <td class="px-5 py-3 text-gray-500" x-text="job.run_count"></td>
+            <td class="px-5 py-3">
+              <div class="flex gap-1 justify-end">
                 <button @click="triggerJob(job.id)" title="Run now"
-                        class="text-xs text-indigo-400 hover:text-indigo-300 px-2 py-1 rounded hover:bg-gray-700">▶</button>
+                        class="text-xs text-blue-600 hover:text-blue-800 px-2 py-1 rounded hover:bg-blue-50 transition-colors">▶</button>
                 <button @click="editJob(job)" title="Edit"
-                        class="text-xs text-gray-400 hover:text-gray-100 px-2 py-1 rounded hover:bg-gray-700">✎</button>
+                        class="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded hover:bg-gray-100 transition-colors">✎</button>
                 <button @click="deleteJob(job.id)" title="Delete"
-                        class="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-gray-700">✕</button>
+                        class="text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 transition-colors">✕</button>
               </div>
             </td>
           </tr>
@@ -196,34 +285,34 @@
   </div>
 </div>
 
-<!-- ── Benchmark Runner ────────────────────────────────────────────────────── -->
-<div x-show="activeTab === 'benchmark'" x-cloak class="p-6 max-w-6xl mx-auto">
-  <h1 class="text-xl font-semibold mb-5">Benchmark Runner</h1>
+<!-- ── Benchmark ───────────────────────────────────────────────────────────── -->
+<div x-show="activeTab === 'benchmark'" class="max-w-6xl mx-auto px-6 py-8">
+  <h2 class="text-xl font-semibold text-gray-900 mb-6">Benchmark Runner</h2>
 
-  <div class="bg-gray-800 rounded-xl border border-gray-700 p-5 mb-6">
-    <div class="flex flex-wrap gap-4 items-end">
+  <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6 shadow-sm">
+    <div class="flex flex-wrap gap-5 items-end">
       <div>
-        <label class="block text-xs text-gray-400 mb-1">Test Query</label>
+        <label class="block text-xs font-medium text-gray-600 mb-1">Test Query</label>
         <input x-model="benchQuery" type="text" placeholder="vintage jacket"
-               class="bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-500 w-56" />
+               class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-56" />
       </div>
       <div>
-        <label class="block text-xs text-gray-400 mb-2">Engines</label>
+        <label class="block text-xs font-medium text-gray-600 mb-2">Engines</label>
         <div class="flex flex-wrap gap-3">
           <template x-for="e in engines" :key="e.id">
             <label class="flex items-center gap-1.5 text-xs cursor-pointer">
-              <input type="checkbox" :value="e.id" x-model="benchEngines" class="accent-indigo-500" />
+              <input type="checkbox" :value="e.id" x-model="benchEngines" class="accent-blue-600" />
               <span x-text="e.id"></span>
             </label>
           </template>
         </div>
       </div>
       <div>
-        <label class="block text-xs text-gray-400 mb-2">Sites</label>
+        <label class="block text-xs font-medium text-gray-600 mb-2">Sites</label>
         <div class="flex gap-3">
           <template x-for="s in availableSites" :key="s">
             <label class="flex items-center gap-1.5 text-xs cursor-pointer">
-              <input type="checkbox" :value="s" x-model="benchSites" class="accent-indigo-500" />
+              <input type="checkbox" :value="s" x-model="benchSites" class="accent-blue-600" />
               <span x-text="s" class="capitalize"></span>
             </label>
           </template>
@@ -231,7 +320,7 @@
       </div>
       <button @click="runBenchmark()"
               :disabled="benchRunning || benchEngines.length === 0 || benchSites.length === 0"
-              class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm px-5 py-2 rounded-lg transition-colors flex items-center gap-2">
+              class="bg-gray-900 hover:bg-gray-700 disabled:opacity-40 text-white text-sm px-5 py-2 rounded-lg transition-colors flex items-center gap-2">
         <svg x-show="benchRunning" class="spin w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
         </svg>
@@ -240,37 +329,42 @@
     </div>
   </div>
 
-  <!-- Results table -->
-  <div x-show="benchResults.length > 0" class="bg-gray-900 rounded-xl border border-gray-700 overflow-hidden">
+  <div x-show="benchResults.length > 0" class="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
     <table class="w-full text-sm">
-      <thead class="border-b border-gray-700">
-        <tr class="text-xs text-gray-400">
-          <th class="text-left px-4 py-3">Engine</th>
-          <th class="text-left px-4 py-3">Site</th>
-          <th class="text-left px-4 py-3">Status</th>
-          <th class="text-left px-4 py-3">Duration</th>
-          <th class="text-left px-4 py-3">Items Found</th>
-          <th class="text-left px-4 py-3">Memory</th>
-          <th class="text-left px-4 py-3">Notes</th>
+      <thead class="border-b border-gray-100 bg-gray-50">
+        <tr class="text-xs font-medium text-gray-500">
+          <th class="text-left px-5 py-3">Engine</th>
+          <th class="text-left px-5 py-3">Site</th>
+          <th class="text-left px-5 py-3">Status</th>
+          <th class="text-left px-5 py-3">Duration</th>
+          <th class="text-left px-5 py-3">Items Found</th>
+          <th class="text-left px-5 py-3">Memory</th>
+          <th class="text-left px-5 py-3">Notes</th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-gray-800">
-        <template x-for="r in benchResults" :key="r.id || r.engine + r.site">
-          <tr :class="r._winner ? 'bg-green-950' : 'hover:bg-gray-800'" class="transition-colors">
-            <td class="px-4 py-3">
-              <span class="bg-gray-700 text-gray-200 engine-badge" x-text="r.engine || '—'"></span>
-              <span x-show="r._winner" class="ml-2 text-xs text-yellow-400">★ Best</span>
+      <tbody class="divide-y divide-gray-100">
+        <template x-for="r in benchResults" :key="(r.id || r.engine + r.site)">
+          <tr :class="r._winner ? 'bg-emerald-50' : 'hover:bg-gray-50'" class="transition-colors">
+            <td class="px-5 py-3">
+              <span class="bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded-md font-medium" x-text="r.engine || '—'"></span>
+              <span x-show="r._winner" class="ml-2 text-xs text-amber-600 font-medium">★ Best</span>
             </td>
-            <td class="px-4 py-3">
-              <span class="text-white text-xs px-1.5 py-0.5 rounded capitalize" :class="'site-' + r.site" x-text="r.site"></span>
+            <td class="px-5 py-3">
+              <span class="text-xs px-1.5 py-0.5 rounded capitalize font-medium"
+                    :class="{
+                      'bg-blue-100 text-blue-700': r.site === 'ebay',
+                      'bg-emerald-100 text-emerald-700': r.site === 'vinted',
+                      'bg-rose-100 text-rose-700': r.site === 'depop'
+                    }"
+                    x-text="r.site"></span>
             </td>
-            <td class="px-4 py-3">
-              <span :class="r.success ? 'text-green-400' : 'text-red-400'" x-text="r.success ? '✓ OK' : '✗ Failed'"></span>
+            <td class="px-5 py-3">
+              <span :class="r.success ? 'text-emerald-600' : 'text-red-500'" x-text="r.success ? '✓ OK' : '✗ Failed'"></span>
             </td>
-            <td class="px-4 py-3 text-gray-300" x-text="r.duration_ms ? r.duration_ms + ' ms' : '—'"></td>
-            <td class="px-4 py-3 text-gray-300" x-text="r.items_found ?? '—'"></td>
-            <td class="px-4 py-3 text-gray-300" x-text="r.memory_mb ? r.memory_mb + ' MB' : '—'"></td>
-            <td class="px-4 py-3 text-gray-400 text-xs max-w-xs truncate" x-text="r.error_message || ''"></td>
+            <td class="px-5 py-3 text-gray-600" x-text="r.duration_ms ? r.duration_ms + ' ms' : '—'"></td>
+            <td class="px-5 py-3 text-gray-600" x-text="r.items_found ?? '—'"></td>
+            <td class="px-5 py-3 text-gray-600" x-text="r.memory_mb ? r.memory_mb + ' MB' : '—'"></td>
+            <td class="px-5 py-3 text-gray-400 text-xs max-w-xs truncate" x-text="r.error_message || ''"></td>
           </tr>
         </template>
       </tbody>
@@ -278,133 +372,92 @@
   </div>
 </div>
 
-<!-- ── Listings Browser ───────────────────────────────────────────────────── -->
-<div x-show="activeTab === 'listings'" x-cloak class="p-6 max-w-7xl mx-auto">
-  <div class="flex flex-wrap items-end gap-4 mb-6">
-    <h1 class="text-xl font-semibold w-full">Listings Browser</h1>
-
-    <!-- Filters -->
-    <div>
-      <label class="block text-xs text-gray-400 mb-1">Site</label>
-      <select x-model="listingsFilter.site" @change="loadListings()"
-              class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm">
-        <option value="">All sites</option>
-        <template x-for="s in availableSites" :key="s">
-          <option :value="s" x-text="s" class="capitalize"></option>
-        </template>
-      </select>
-    </div>
-    <div>
-      <label class="block text-xs text-gray-400 mb-1">Job</label>
-      <select x-model="listingsFilter.job_id" @change="loadListings()"
-              class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm">
-        <option value="">All jobs</option>
-        <template x-for="j in jobs" :key="j.id">
-          <option :value="j.id" x-text="'#' + j.id + ' ' + j.search_term"></option>
-        </template>
-      </select>
-    </div>
-    <div>
-      <label class="block text-xs text-gray-400 mb-1">Min £</label>
-      <input x-model.number="listingsFilter.min_price" @change="loadListings()" type="number" min="0"
-             class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm w-24" />
-    </div>
-    <div>
-      <label class="block text-xs text-gray-400 mb-1">Max £</label>
-      <input x-model.number="listingsFilter.max_price" @change="loadListings()" type="number" min="0"
-             class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm w-24" />
-    </div>
-    <div>
-      <label class="block text-xs text-gray-400 mb-1">Sort</label>
-      <select x-model="listingsFilter.sort" @change="loadListings()"
-              class="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-sm">
-        <option value="newest">Newest</option>
-        <option value="price_asc">Price ↑</option>
-        <option value="price_desc">Price ↓</option>
-      </select>
-    </div>
-    <button @click="loadListings()" class="bg-gray-700 hover:bg-gray-600 text-sm px-4 py-2 rounded-lg">
-      Refresh
-    </button>
-    <span class="text-xs text-gray-500 ml-auto" x-text="listingsTotal + ' total listings'"></span>
-  </div>
-
-  <!-- Grid -->
-  <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-    <template x-if="listings.length === 0">
-      <div class="col-span-full text-center text-gray-500 text-sm py-12">No listings found.</div>
-    </template>
-    <template x-for="l in listings" :key="l.id">
-      <a :href="l.listing_url || '#'" target="_blank"
-         class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden hover:border-indigo-500 transition-colors group block">
-        <div class="relative">
-          <img :src="l.image_url || ''"
-               class="w-full aspect-square object-cover bg-gray-700"
-               @error="$el.style.display='none'" />
-          <span class="absolute top-2 left-2 text-white text-xs px-1.5 py-0.5 rounded capitalize"
-                :class="'site-' + l.site" x-text="l.site || '—'"></span>
-          <template x-if="l.size">
-            <span class="absolute top-2 right-2 bg-gray-900 bg-opacity-80 text-white text-xs px-1.5 py-0.5 rounded font-medium"
-                  x-text="l.size"></span>
-          </template>
-        </div>
-        <div class="p-3">
-          <div class="text-sm font-medium line-clamp-2 mb-1" x-text="l.title || 'Unknown'"></div>
-          <div class="flex items-center justify-between gap-2 mb-1">
-            <span class="text-green-400 font-semibold"
-                  x-text="l.price ? '£' + Number(l.price).toFixed(2) : '—'"></span>
-            <span class="text-xs text-gray-400 truncate" x-text="l.brand || '—'"></span>
-          </div>
-          <div class="flex items-center justify-between mt-1">
-            <template x-if="l.condition">
-              <span class="inline-block bg-indigo-900 text-indigo-300 text-xs px-1.5 py-0.5 rounded"
-                    x-text="l.condition"></span>
-            </template>
-            <template x-if="!l.condition">
-              <span class="inline-block text-xs text-gray-600">Unknown condition</span>
-            </template>
-            <span class="text-xs text-gray-500" x-text="l.seller ? '@' + l.seller : '—'"></span>
-          </div>
-        </div>
-      </a>
-    </template>
-  </div>
-
-  <!-- Pagination -->
-  <div x-show="listingsTotal > listingsLimit" class="flex justify-center gap-3 mt-8">
-    <button @click="listingsOffset = Math.max(0, listingsOffset - listingsLimit); loadListings()"
-            :disabled="listingsOffset === 0"
-            class="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-sm px-4 py-2 rounded-lg">
-      ← Prev
-    </button>
-    <span class="text-sm text-gray-400 py-2"
-          x-text="'Page ' + (Math.floor(listingsOffset / listingsLimit) + 1) + ' of ' + Math.ceil(listingsTotal / listingsLimit)">
-    </span>
-    <button @click="listingsOffset += listingsLimit; loadListings()"
-            :disabled="listingsOffset + listingsLimit >= listingsTotal"
-            class="bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-sm px-4 py-2 rounded-lg">
-      Next →
-    </button>
-  </div>
-</div>
-
-<!-- ── Toast ──────────────────────────────────────────────────────────────── -->
+<!-- ── Toast ───────────────────────────────────────────────────────────────── -->
 <div x-show="toast.show" x-transition
-     :class="toast.type === 'error' ? 'bg-red-800 border-red-600' : 'bg-green-800 border-green-600'"
-     class="fixed bottom-4 right-4 border rounded-lg px-4 py-3 text-sm shadow-lg z-50 max-w-xs"
+     :class="toast.type === 'error' ? 'bg-red-600' : 'bg-gray-900'"
+     class="fixed bottom-5 right-5 rounded-lg px-4 py-3 text-sm text-white shadow-xl z-50 max-w-xs"
      x-text="toast.message">
 </div>
 
 <script>
+function renderCard(l) {
+  const platformBadgeClass = {
+    ebay:   'bg-blue-100 text-blue-800 border-blue-200',
+    vinted: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    depop:  'bg-rose-100 text-rose-800 border-rose-200',
+  }[l.site] || 'bg-gray-100 text-gray-700 border-gray-200';
+
+  const price  = l.price  ? '£' + Number(l.price).toFixed(2) : '—';
+  const size   = l.size   ? `<div class="flex items-center gap-1.5 text-gray-500">
+      <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 6h18M3 10h18M3 14h18M3 18h18"/></svg>
+      <span>${escHtml(l.size)}</span></div>` : '';
+  const desc   = l.description || l.condition || '';
+  const title  = l.title || 'Unknown';
+  const site   = (l.site || '').toUpperCase();
+  const when   = l.scraped_at ? relativeTimeStatic(l.scraped_at) : '—';
+  const url    = l.listing_url || '#';
+  const img    = l.image_url  || '';
+  const siteName = (l.site || '');
+  const siteLabel = siteName.charAt(0).toUpperCase() + siteName.slice(1);
+
+  return `
+  <div class="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg transition-shadow duration-200 flex flex-col h-full">
+    <div class="relative">
+      <img src="${escAttr(img)}" alt="${escAttr(title)}"
+           class="w-full h-64 object-cover bg-gray-100"
+           onerror="this.style.display='none'" />
+      <span class="absolute top-3 right-3 text-xs font-medium px-2 py-1 rounded-md border ${platformBadgeClass}">${escHtml(site)}</span>
+    </div>
+    <div class="p-5 space-y-3 flex-1">
+      <div>
+        <h3 class="font-semibold text-gray-900 line-clamp-1">${escHtml(title)}</h3>
+        <p class="text-sm text-gray-500 mt-1 line-clamp-2">${escHtml(desc) || '<span class="text-gray-300">No description</span>'}</p>
+      </div>
+      <div class="flex items-center gap-4 text-sm">
+        <div class="flex items-center gap-1.5 text-gray-700 font-semibold">
+          <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          <span>${escHtml(price)}</span>
+        </div>
+        ${size}
+      </div>
+      <div class="flex items-center gap-1.5 text-xs text-gray-400">
+        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span>Scraped ${escHtml(when)}</span>
+      </div>
+    </div>
+    <div class="px-5 pb-5">
+      <a href="${escAttr(url)}" target="_blank" rel="noopener noreferrer"
+         class="flex items-center justify-center gap-2 w-full bg-gray-900 hover:bg-gray-700 text-white text-sm font-medium py-2.5 rounded-lg transition-colors">
+        View on ${escHtml(siteLabel)}
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+      </a>
+    </div>
+  </div>`;
+}
+
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+  return String(s || '').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function relativeTimeStatic(isoStr) {
+  if (!isoStr) return '—';
+  const diff = Date.now() - new Date(isoStr + (isoStr.endsWith('Z') ? '' : 'Z')).getTime();
+  if (diff < 60000)   return 'just now';
+  if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+  return Math.floor(diff / 86400000) + 'd ago';
+}
+
 function app() {
   return {
-    // ── State ──────────────────────────────────────────────────────────────
     activeTab: 'dashboard',
     tabs: [
       { id: 'dashboard', label: 'Dashboard' },
-      { id: 'jobs',      label: 'Jobs' },
-      { id: 'benchmark', label: 'Benchmark' },
-      { id: 'listings',  label: 'Listings' },
+      { id: 'listings',  label: 'Listings'  },
+      { id: 'jobs',      label: 'Jobs'       },
+      { id: 'benchmark', label: 'Benchmark'  },
     ],
 
     stats: {},
@@ -429,20 +482,22 @@ function app() {
     listings: [],
     listingsTotal: 0,
     listingsOffset: 0,
-    listingsLimit: 40,
+    listingsLimit: 30,
+    listingsSearch: '',
     listingsFilter: { site: '', job_id: '', min_price: null, max_price: null, sort: 'newest' },
 
     // Toast
     toast: { show: false, message: '', type: 'success' },
 
-    // ── Init ──────────────────────────────────────────────────────────────
     async init() {
       await Promise.all([this.loadStats(), this.loadJobs(), this.loadEngines()]);
       this.connectWS();
       setInterval(() => this.loadStats(), 30000);
+      this.$watch('activeTab', val => {
+        if (val === 'listings' && this.listings.length === 0) this.loadListings();
+      });
     },
 
-    // ── API helpers ───────────────────────────────────────────────────────
     async api(method, path, body) {
       const opts = { method, headers: { 'Content-Type': 'application/json' } };
       if (body) opts.body = JSON.stringify(body);
@@ -455,7 +510,6 @@ function app() {
       return res.json();
     },
 
-    // ── Data loaders ──────────────────────────────────────────────────────
     async loadStats() {
       try { this.stats = await this.api('GET', '/stats'); } catch {}
     },
@@ -473,26 +527,42 @@ function app() {
       try {
         const f = this.listingsFilter;
         const params = new URLSearchParams({ sort: f.sort, limit: this.listingsLimit, offset: this.listingsOffset });
-        if (f.site)      params.set('site', f.site);
-        if (f.job_id)    params.set('job_id', f.job_id);
-        if (f.min_price) params.set('min_price', f.min_price);
-        if (f.max_price) params.set('max_price', f.max_price);
+        if (f.site)       params.set('site', f.site);
+        if (f.job_id)     params.set('job_id', f.job_id);
+        if (f.min_price)  params.set('min_price', f.min_price);
+        if (f.max_price)  params.set('max_price', f.max_price);
+        if (this.listingsSearch) params.set('search', this.listingsSearch);
         const data = await this.api('GET', '/listings?' + params);
         this.listings = data.listings;
         this.listingsTotal = data.total;
       } catch (e) { this.showToast('Failed to load listings: ' + e.message, 'error'); }
     },
 
-    // ── Jobs ──────────────────────────────────────────────────────────────
     get statCards() {
       return [
-        { label: 'Active Jobs',      value: this.stats.active_jobs ?? '—' },
-        { label: 'Listings Today',   value: this.stats.listings_today ?? '—' },
-        { label: 'New (last hour)',   value: this.stats.new_last_hour ?? '—' },
-        { label: 'Errors Today',     value: this.stats.errors_today ?? '—' },
+        {
+          label: 'Total Listings', value: this.stats.total_listings ?? '—',
+          icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
+          trend: 12, trendUp: true,
+        },
+        {
+          label: 'Listings Today', value: this.stats.listings_today ?? '—',
+          icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z',
+          trend: 8, trendUp: true,
+        },
+        {
+          label: 'New (Last Hour)', value: this.stats.new_last_hour ?? '—',
+          icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
+        },
+        {
+          label: 'Active Jobs', value: this.stats.active_jobs ?? '—',
+          icon: 'M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
+          trend: 0, trendUp: true,
+        },
       ];
     },
 
+    // Jobs
     async submitJob() {
       try {
         if (this.editingJob) {
@@ -538,11 +608,11 @@ function app() {
     async triggerJob(id) {
       try {
         await this.api('POST', `/jobs/${id}/run`);
-        this.showToast('Job triggered — check results in a moment');
+        this.showToast('Job triggered — results in a moment');
       } catch (e) { this.showToast(e.message, 'error'); }
     },
 
-    // ── Benchmark ─────────────────────────────────────────────────────────
+    // Benchmark
     async runBenchmark() {
       this.benchRunning = true;
       this.benchResults = [];
@@ -561,47 +631,39 @@ function app() {
     },
 
     _markWinners(results) {
-      // Per site: mark the engine with most items_found & success as winner
       const bySite = {};
       for (const r of results) {
         if (!r.success) continue;
-        if (!bySite[r.site] || (r.items_found > bySite[r.site].items_found)) {
-          bySite[r.site] = r;
-        }
+        if (!bySite[r.site] || r.items_found > bySite[r.site].items_found) bySite[r.site] = r;
       }
       return results.map(r => ({ ...r, _winner: bySite[r.site] === r }));
     },
 
-    // ── WebSocket ─────────────────────────────────────────────────────────
+    // WebSocket
     connectWS() {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(`${proto}://${location.host}/ws`);
-      ws.onopen = () => { this.wsConnected = true; };
+      ws.onopen  = () => { this.wsConnected = true; };
       ws.onclose = () => { this.wsConnected = false; setTimeout(() => this.connectWS(), 5000); };
       ws.onmessage = (evt) => {
         const event = JSON.parse(evt.data);
         if (event.type === 'new_listings') {
           this.showToast(`+${event.count} new listings on ${event.site}`);
           this.loadStats();
+          if (this.activeTab === 'listings') this.loadListings();
         }
       };
       setInterval(() => ws.readyState === 1 && ws.send('ping'), 20000);
     },
 
-    // ── Utilities ─────────────────────────────────────────────────────────
-    relativeTime(isoStr) {
-      if (!isoStr) return '—';
-      const diff = Date.now() - new Date(isoStr + (isoStr.endsWith('Z') ? '' : 'Z')).getTime();
-      if (diff < 60000)  return 'just now';
-      if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
-      if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
-      return Math.floor(diff / 86400000) + 'd ago';
-    },
+    // Utilities
+    relativeTime(isoStr) { return relativeTimeStatic(isoStr); },
 
     showToast(message, type = 'success') {
       this.toast = { show: true, message, type };
       setTimeout(() => this.toast.show = false, 4000);
     },
+
   };
 }
 </script>

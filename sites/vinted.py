@@ -31,6 +31,7 @@ def normalise(raw: dict[str, Any]) -> dict[str, Any]:
         "site": "vinted",
         "listing_id": raw.get("listing_id") or extract_listing_id(url) or "",
         "title": raw.get("title", "").strip(),
+        "description": raw.get("description", "").strip() or None,
         "price": _parse_price(raw.get("price")),
         "currency": raw.get("currency", "GBP"),
         "brand": raw.get("brand", "").strip() or None,
