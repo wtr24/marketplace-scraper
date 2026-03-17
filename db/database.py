@@ -112,12 +112,15 @@ class Database:
 
     async def upsert_listings(
         self, listings: list[dict[str, Any]], job_id: Optional[int] = None
-    ) -> int:
-        """Insert listings, ignoring duplicates. Returns number of new rows inserted."""
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """Insert listings, ignoring duplicates.
+        Returns (new_count, new_items) where new_items are the dicts actually inserted."""
         if not listings:
-            return 0
+            return 0, []
 
         new_count = 0
+        new_items: list[dict[str, Any]] = []
+        now = _utcnow()
         async with self.SessionLocal() as session:
             for item in listings:
                 # Skip rows with no listing_id — they'd all conflict on the same dedup key
@@ -138,13 +141,15 @@ class Database:
                     image_url=item.get("image_url"),
                     listing_url=item.get("listing_url"),
                     raw_json=json.dumps(item.get("raw", {})),
-                    scraped_at=_utcnow(),
+                    scraped_at=now,
                 )
                 stmt = stmt.on_conflict_do_nothing(index_elements=["site", "listing_id"])
                 result = await session.execute(stmt)
-                new_count += result.rowcount
+                if result.rowcount:
+                    new_count += 1
+                    new_items.append({**item, "scraped_at": now.isoformat()})
             await session.commit()
-        return new_count
+        return new_count, new_items
 
     async def get_listings(
         self,

@@ -19,6 +19,7 @@ services:
       - TZ=Europe/London
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
     mem_limit: 2g
     cpus: '2.0'
     shm_size: '256mb'

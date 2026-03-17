@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -97,6 +98,9 @@ async def _run_all_active_jobs():
 
 async def _execute_job(job):
     from scrapers import get_engine
+    from discord_webhook import send_fleece_alerts
+
+    discord_url = os.getenv("DISCORD_WEBHOOK_URL")
 
     sites = json.loads(job.sites) if isinstance(job.sites, str) else job.sites
     engine = get_engine(job.engine)
@@ -107,7 +111,7 @@ async def _execute_job(job):
             logger.info(f"[scheduler] job={job.id} engine={job.engine} site={site} term='{job.search_term}'")
             result = await engine.scrape(site, job.search_term)
 
-            items_new = await _db.upsert_listings(result.listings, job_id=job.id)
+            items_new, new_items = await _db.upsert_listings(result.listings, job_id=job.id)
 
             sr = await _db.save_scraper_result({
                 "job_id": job.id,
@@ -135,6 +139,12 @@ async def _execute_job(job):
                     "site": site,
                     "count": items_new,
                 })
+
+            # Discord fleece alerts — only for genuinely new listings
+            if new_items and discord_url:
+                alerts_sent = await send_fleece_alerts(new_items, discord_url)
+                if alerts_sent:
+                    logger.info(f"[discord] {alerts_sent} fleece alert(s) sent for job={job.id} site={site}")
 
         except Exception as exc:
             logger.error(f"[scheduler] job={job.id} site={site} error: {exc}", exc_info=True)
