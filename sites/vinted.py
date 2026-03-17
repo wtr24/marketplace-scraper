@@ -54,16 +54,17 @@ def _parse_price(value: Any) -> Optional[float]:
 
 
 # Playwright / Puppeteer CSS selectors
+# Vinted uses per-item namespaced data-testid: product-item-id-{id}--{field}
+# Suffix-matching ($=) and prefix-matching (^=) keeps selectors stable across IDs.
 SELECTORS = {
-    "grid_item": '[data-testid="grid-item"]',
-    "title": '[data-testid="item-title"]',
-    "price": '[data-testid="item-price"]',
-    "brand": '[data-testid="item-brand"]',
-    "size": '[data-testid="item-size"]',
-    "condition": '[data-testid="item-status"]',
-    "image": 'img[data-testid="item-photo"]',
-    "seller": '[data-testid="owner-username"]',
-    "link": 'a[data-testid="item-link"]',
+    "grid_item": "[data-testid^='product-item-id-']:not([data-testid*='--'])",
+    "title":     "img[data-testid$='--image--img']",      # read .alt, split on ', brand:'
+    "price":     "p[data-testid$='--price-text']",
+    "subtitle":  "p[data-testid$='--description-subtitle']",  # 'Size · Condition' — split on ' · '
+    "size":      "p[data-testid$='--description-subtitle']",  # index 0 after split
+    "condition": "p[data-testid$='--description-subtitle']",  # index 1 after split
+    "image":     "img[data-testid$='--image--img']",      # read .src
+    "link":      "a[data-testid$='--overlay-link']",      # read .href
 }
 
 # Beautiful Soup CSS selectors (fallback / static parse)

@@ -342,15 +342,29 @@
                class="w-full aspect-square object-cover bg-gray-700"
                @error="$el.style.display='none'" />
           <span class="absolute top-2 left-2 text-white text-xs px-1.5 py-0.5 rounded capitalize"
-                :class="'site-' + l.site" x-text="l.site"></span>
+                :class="'site-' + l.site" x-text="l.site || '—'"></span>
+          <template x-if="l.size">
+            <span class="absolute top-2 right-2 bg-gray-900 bg-opacity-80 text-white text-xs px-1.5 py-0.5 rounded font-medium"
+                  x-text="l.size"></span>
+          </template>
         </div>
         <div class="p-3">
-          <div class="text-sm font-medium line-clamp-2 mb-1" x-text="l.title || '—'"></div>
-          <div class="flex items-center justify-between">
-            <span class="text-green-400 font-semibold" x-text="l.price ? '£' + l.price.toFixed(2) : '—'"></span>
-            <span class="text-xs text-gray-500" x-text="l.brand || ''"></span>
+          <div class="text-sm font-medium line-clamp-2 mb-1" x-text="l.title || 'Unknown'"></div>
+          <div class="flex items-center justify-between gap-2 mb-1">
+            <span class="text-green-400 font-semibold"
+                  x-text="l.price ? '£' + Number(l.price).toFixed(2) : '—'"></span>
+            <span class="text-xs text-gray-400 truncate" x-text="l.brand || '—'"></span>
           </div>
-          <div class="text-xs text-gray-500 mt-1 truncate" x-text="l.seller ? '@' + l.seller : ''"></div>
+          <div class="flex items-center justify-between mt-1">
+            <template x-if="l.condition">
+              <span class="inline-block bg-indigo-900 text-indigo-300 text-xs px-1.5 py-0.5 rounded"
+                    x-text="l.condition"></span>
+            </template>
+            <template x-if="!l.condition">
+              <span class="inline-block text-xs text-gray-600">Unknown condition</span>
+            </template>
+            <span class="text-xs text-gray-500" x-text="l.seller ? '@' + l.seller : '—'"></span>
+          </div>
         </div>
       </a>
     </template>

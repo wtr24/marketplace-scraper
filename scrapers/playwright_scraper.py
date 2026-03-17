@@ -1,4 +1,5 @@
 """Playwright scraper — primary engine for JS-heavy sites."""
+import json
 import logging
 import re
 from typing import Any
@@ -101,14 +102,55 @@ class PlaywrightScraper(BaseScraper):
     async def _scrape_vinted(self, page, site_mod) -> list[dict[str, Any]]:
         sel = site_mod.SELECTORS
 
-        # Wait for grid items
+        # Wait for grid items (corrected selector)
         try:
             await page.wait_for_selector(sel["grid_item"], timeout=15000)
         except Exception:
             logger.warning("[playwright/vinted] grid_item timeout — possibly blocked")
             return []
 
-        # Scroll to load more
+        # ── PRIMARY: __NEXT_DATA__ JSON extraction ────────────────────────────
+        try:
+            next_data_el = await page.query_selector("script#__NEXT_DATA__")
+            if next_data_el:
+                raw_json = await next_data_el.inner_text()
+                data = json.loads(raw_json)
+                page_props = data.get("props", {}).get("pageProps", {})
+                catalog = page_props.get("catalog", {})
+                items_raw = catalog.get("items") or page_props.get("items")
+
+                if items_raw and isinstance(items_raw, list):
+                    listings = []
+                    for item in items_raw:
+                        try:
+                            price_info = item.get("price", {})
+                            photos = item.get("photos", [])
+                            image_url = photos[0].get("url", "") if photos else ""
+                            relative_url = item.get("url", "")
+                            full_url = (
+                                "https://www.vinted.co.uk" + relative_url
+                                if relative_url and not relative_url.startswith("http")
+                                else relative_url
+                            )
+                            raw = {
+                                "listing_id": str(item.get("id", "")),
+                                "title": item.get("title", ""),
+                                "price": price_info.get("amount", ""),
+                                "size": item.get("size_title", ""),
+                                "condition": item.get("status", ""),
+                                "image_url": image_url,
+                                "url": full_url,
+                            }
+                            listings.append(site_mod.normalise(raw))
+                        except Exception as e:
+                            logger.debug(f"[playwright/vinted] __NEXT_DATA__ item error: {e}")
+
+                    logger.info(f"[playwright/vinted] __NEXT_DATA__ returned {len(listings)} listings")
+                    return listings
+        except Exception as e:
+            logger.warning(f"[playwright/vinted] __NEXT_DATA__ failed: {e} — falling back to DOM")
+
+        # ── FALLBACK: DOM scraping with corrected selectors ───────────────────
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight * 0.6)")
         await random_delay(1, 3)
 
@@ -117,30 +159,43 @@ class PlaywrightScraper(BaseScraper):
         for item in items:
             try:
                 raw = {}
-                title_el = await item.query_selector(sel["title"])
-                price_el = await item.query_selector(sel["price"])
-                brand_el = await item.query_selector(sel["brand"])
-                size_el = await item.query_selector(sel["size"])
-                condition_el = await item.query_selector(sel["condition"])
                 image_el = await item.query_selector(sel["image"])
                 link_el = await item.query_selector(sel["link"])
+                price_el = await item.query_selector(sel["price"])
+                subtitle_el = await item.query_selector(sel["subtitle"])
 
-                raw["title"] = await title_el.inner_text() if title_el else ""
-                raw["price"] = await price_el.inner_text() if price_el else ""
-                raw["brand"] = await brand_el.inner_text() if brand_el else ""
-                raw["size"] = await size_el.inner_text() if size_el else ""
-                raw["condition"] = await condition_el.inner_text() if condition_el else ""
+                # Title from img alt attribute (before ', brand:' marker)
+                alt_text = await image_el.get_attribute("alt") if image_el else ""
+                if ", brand:" in alt_text:
+                    raw["title"] = alt_text.split(", brand:")[0].strip()
+                elif "," in alt_text:
+                    raw["title"] = alt_text.split(",")[0].strip()
+                else:
+                    raw["title"] = alt_text.strip()
+
+                raw["price"] = (await price_el.inner_text()).strip() if price_el else ""
+
+                # Subtitle: 'Size · Condition' — split on ' · '
+                subtitle_text = (await subtitle_el.inner_text()).strip() if subtitle_el else ""
+                parts = subtitle_text.split(" · ")
+                raw["size"] = parts[0].strip() if len(parts) > 0 else ""
+                raw["condition"] = parts[1].strip() if len(parts) > 1 else ""
+
                 raw["image_url"] = await image_el.get_attribute("src") if image_el else ""
                 raw["url"] = await link_el.get_attribute("href") if link_el else ""
-
                 if raw["url"] and not raw["url"].startswith("http"):
                     raw["url"] = "https://www.vinted.co.uk" + raw["url"]
 
+                # listing_id from leading digits of last path segment
+                if raw["url"]:
+                    last_seg = raw["url"].rstrip("/").split("/")[-1]
+                    raw["listing_id"] = "".join(ch for ch in last_seg if ch.isdigit())
+
                 listings.append(site_mod.normalise(raw))
             except Exception as e:
-                logger.debug(f"[playwright/vinted] item parse error: {e}")
+                logger.debug(f"[playwright/vinted] DOM item parse error: {e}")
 
-        logger.info(f"[playwright/vinted] found {len(listings)} listings")
+        logger.info(f"[playwright/vinted] DOM fallback found {len(listings)} listings")
         return listings
 
     # ─── eBay ────────────────────────────────────────────────────────────────
