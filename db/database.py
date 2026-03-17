@@ -38,6 +38,10 @@ class Database:
                 await conn.execute(text("ALTER TABLE listings ADD COLUMN description TEXT"))
             except Exception:
                 pass  # column already exists
+            try:
+                await conn.execute(text("ALTER TABLE jobs ADD COLUMN interval_minutes INTEGER DEFAULT 60"))
+            except Exception:
+                pass  # column already exists
         logger.info("Database initialised")
 
     async def close(self):
@@ -45,12 +49,13 @@ class Database:
 
     # ─── Jobs ───────────────────────────────────────────────────────────────
 
-    async def create_job(self, search_term: str, engine: str, sites: list[str]) -> Job:
+    async def create_job(self, search_term: str, engine: str, sites: list[str], interval_minutes: int = 60) -> Job:
         async with self.SessionLocal() as session:
             job = Job(
                 search_term=search_term,
                 engine=engine,
                 sites=json.dumps(sites),
+                interval_minutes=interval_minutes,
             )
             session.add(job)
             await session.commit()

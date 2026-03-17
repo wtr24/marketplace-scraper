@@ -2,7 +2,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -70,8 +70,28 @@ async def _run_all_active_jobs():
         logger.debug("No active jobs to run")
         return
 
-    logger.info(f"Running {len(jobs)} active job(s)")
-    tasks = [_execute_job(job) for job in jobs]
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    due = []
+    for job in jobs:
+        interval = job.interval_minutes or 60
+        if job.last_run is None:
+            due.append(job)
+        else:
+            elapsed = (now - job.last_run).total_seconds() / 60
+            if elapsed >= interval:
+                due.append(job)
+            else:
+                logger.debug(
+                    f"[scheduler] job={job.id} skipped — "
+                    f"{elapsed:.1f}m elapsed, interval={interval}m"
+                )
+
+    if not due:
+        logger.debug("No jobs due to run")
+        return
+
+    logger.info(f"Running {len(due)}/{len(jobs)} due job(s)")
+    tasks = [_execute_job(job) for job in due]
     await asyncio.gather(*tasks, return_exceptions=True)
 
 

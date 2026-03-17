@@ -22,6 +22,7 @@ class Job(Base):
     )
     sites = Column(Text, nullable=False)  # JSON array: ["vinted","ebay","depop"]
     active = Column(Boolean, default=True)
+    interval_minutes = Column(Integer, default=60)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_run = Column(DateTime, nullable=True)
     run_count = Column(Integer, default=0)

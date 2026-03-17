@@ -91,6 +91,7 @@ class JobCreate(BaseModel):
     search_term: str
     engine: str
     sites: list[str]
+    interval_minutes: int = 60
 
     @field_validator("engine")
     @classmethod
@@ -113,6 +114,7 @@ class JobUpdate(BaseModel):
     engine: Optional[str] = None
     sites: Optional[list[str]] = None
     active: Optional[bool] = None
+    interval_minutes: Optional[int] = None
 
 
 class BenchmarkRequest(BaseModel):
@@ -147,6 +149,7 @@ async def list_jobs(active_only: bool = False):
             "engine": j.engine,
             "sites": json.loads(j.sites) if isinstance(j.sites, str) else j.sites,
             "active": j.active,
+            "interval_minutes": j.interval_minutes or 60,
             "created_at": j.created_at.isoformat() if j.created_at else None,
             "last_run": j.last_run.isoformat() if j.last_run else None,
             "run_count": j.run_count,
@@ -157,7 +160,7 @@ async def list_jobs(active_only: bool = False):
 
 @app.post("/api/jobs", status_code=201)
 async def create_job(body: JobCreate):
-    job = await db.create_job(body.search_term, body.engine, body.sites)
+    job = await db.create_job(body.search_term, body.engine, body.sites, body.interval_minutes)
     return {"id": job.id, "message": "Job created"}
 
 

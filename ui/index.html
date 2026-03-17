@@ -43,7 +43,7 @@
             <span class="w-1.5 h-1.5 rounded-full inline-block" :class="wsConnected ? 'bg-emerald-500' : 'bg-red-400'"></span>
             <span x-text="wsConnected ? 'Live' : 'Offline'"></span>
           </span>
-          <span x-text="'Next run: ' + (stats.next_run ? relativeTime(stats.next_run) : '—')"></span>
+          <span x-text="'Next run: ' + (stats.next_run ? timeUntil(stats.next_run) : '—')"></span>
         </div>
       </div>
     </div>
@@ -211,6 +211,11 @@
           </template>
         </div>
       </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-600 mb-1">Run every (minutes)</label>
+        <input x-model.number="jobForm.interval_minutes" type="number" min="5" step="5" placeholder="60"
+               class="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      </div>
     </div>
     <div class="flex gap-3 mt-5">
       <button @click="submitJob()"
@@ -234,6 +239,7 @@
           <th class="text-left px-5 py-3">Engine</th>
           <th class="text-left px-5 py-3">Sites</th>
           <th class="text-left px-5 py-3">Status</th>
+          <th class="text-left px-5 py-3">Interval</th>
           <th class="text-left px-5 py-3">Last Run</th>
           <th class="text-left px-5 py-3">Runs</th>
           <th class="px-5 py-3"></th>
@@ -266,6 +272,7 @@
                       x-text="job.active ? 'Active' : 'Paused'">
               </button>
             </td>
+            <td class="px-5 py-3 text-gray-500 text-xs" x-text="(job.interval_minutes || 60) + 'm'"></td>
             <td class="px-5 py-3 text-gray-500 text-xs" x-text="job.last_run ? relativeTime(job.last_run) : 'Never'"></td>
             <td class="px-5 py-3 text-gray-500" x-text="job.run_count"></td>
             <td class="px-5 py-3">
@@ -441,13 +448,24 @@ function escHtml(s) {
 function escAttr(s) {
   return String(s || '').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
+function _parseIso(isoStr) {
+  // Normalise APScheduler "+00:00" suffix → "Z" so Date() parses correctly
+  return new Date(isoStr.replace(/\+00:00$/, 'Z'));
+}
 function relativeTimeStatic(isoStr) {
   if (!isoStr) return '—';
-  const diff = Date.now() - new Date(isoStr + (isoStr.endsWith('Z') ? '' : 'Z')).getTime();
-  if (diff < 60000)   return 'just now';
-  if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+  const diff = Date.now() - _parseIso(isoStr).getTime();
+  if (diff < 60000)    return 'just now';
+  if (diff < 3600000)  return Math.floor(diff / 60000) + 'm ago';
   if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
   return Math.floor(diff / 86400000) + 'd ago';
+}
+function timeUntil(isoStr) {
+  if (!isoStr) return '—';
+  const diff = _parseIso(isoStr).getTime() - Date.now();
+  if (diff <= 0)       return 'now';
+  if (diff < 3600000)  return 'in ' + Math.ceil(diff / 60000) + 'm';
+  return 'in ' + Math.ceil(diff / 3600000) + 'h';
 }
 
 function app() {
@@ -469,7 +487,7 @@ function app() {
     // Job form
     showJobForm: false,
     editingJob: null,
-    jobForm: { search_term: '', engine: 'playwright', sites: ['vinted', 'ebay', 'depop'] },
+    jobForm: { search_term: '', engine: 'playwright', sites: ['vinted', 'ebay', 'depop'], interval_minutes: 60 },
 
     // Benchmark
     benchQuery: 'vintage jacket',
@@ -579,14 +597,14 @@ function app() {
 
     editJob(job) {
       this.editingJob = job;
-      this.jobForm = { search_term: job.search_term, engine: job.engine, sites: [...job.sites] };
+      this.jobForm = { search_term: job.search_term, engine: job.engine, sites: [...job.sites], interval_minutes: job.interval_minutes || 60 };
       this.showJobForm = true;
     },
 
     cancelJobForm() {
       this.showJobForm = false;
       this.editingJob = null;
-      this.jobForm = { search_term: '', engine: this.engines[0]?.id || 'playwright', sites: ['vinted', 'ebay', 'depop'] };
+      this.jobForm = { search_term: '', engine: this.engines[0]?.id || 'playwright', sites: ['vinted', 'ebay', 'depop'], interval_minutes: 60 };
     },
 
     async toggleJob(job) {
@@ -658,6 +676,7 @@ function app() {
 
     // Utilities
     relativeTime(isoStr) { return relativeTimeStatic(isoStr); },
+    timeUntil(isoStr) { return timeUntil(isoStr); },
 
     showToast(message, type = 'success') {
       this.toast = { show: true, message, type };
