@@ -237,9 +237,9 @@ class PlaywrightScraper(BaseScraper):
                 raw["image_url"] = await image_el.get_attribute("src") if image_el else ""
                 raw["seller"] = (await seller_el.inner_text()).strip() if seller_el else ""
 
-                # Skip ads/promos: real UK listings have ebay.co.uk/itm/ URL
+                # Skip ads/promos: only keep real UK listings (ebay.co.uk/itm/)
                 url = raw.get("url", "")
-                if not url or "/itm/" not in url:
+                if not url or "ebay.co.uk/itm/" not in url:
                     continue
 
                 listings.append(site_mod.normalise(raw))

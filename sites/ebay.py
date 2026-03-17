@@ -3,8 +3,8 @@ import re
 from typing import Any, Optional
 from urllib.parse import quote_plus, urlparse, parse_qs
 
-# _sop=10 = newly listed
-SEARCH_URL = "https://www.ebay.co.uk/sch/i.html?_nkw={query}&_sop=10"
+# _sop=10 = newly listed, LH_PrefLoc=1 = items located in UK only
+SEARCH_URL = "https://www.ebay.co.uk/sch/i.html?_nkw={query}&_sop=10&LH_PrefLoc=1"
 
 
 def build_url(query: str) -> str:
@@ -69,7 +69,7 @@ SELECTORS = {
     "condition": "span.su-styled-text.secondary.default",  # "Brand new" / "Used" etc.
     "shipping": None,
     "seller": None,                                   # not shown on new search cards
-    "link": "a[href*='/itm/']",
+    "link": "a[href*='ebay.co.uk/itm/']",
     "image": "img.s-card__image",
     "end_time": None,
 }
