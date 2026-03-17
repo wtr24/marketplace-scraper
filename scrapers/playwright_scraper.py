@@ -74,6 +74,15 @@ class PlaywrightScraper(BaseScraper):
             page = await context.new_page()
 
             try:
+                # eBay: warm up session via homepage to get cookies before hitting search
+                if site == "ebay":
+                    logger.info("[playwright/ebay] Warming up session via homepage")
+                    try:
+                        await page.goto("https://www.ebay.co.uk/", wait_until="domcontentloaded", timeout=20000)
+                        await random_delay(2, 4)
+                    except Exception as e:
+                        logger.debug(f"[playwright/ebay] homepage warmup failed: {e}")
+
                 logger.info(f"[playwright] Navigating to {url}")
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 await random_delay(2, 5)
