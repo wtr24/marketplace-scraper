@@ -69,12 +69,14 @@ async def test_upsert_listings_deduplication(db):
         }
     ]
 
-    count1 = await db.upsert_listings(listings, job_id=job.id)
+    count1, new_items1 = await db.upsert_listings(listings, job_id=job.id)
     assert count1 == 1
+    assert len(new_items1) == 1
 
     # Insert same listing again — should be ignored
-    count2 = await db.upsert_listings(listings, job_id=job.id)
+    count2, new_items2 = await db.upsert_listings(listings, job_id=job.id)
     assert count2 == 0
+    assert new_items2 == []
 
     all_listings, total = await db.get_listings(job_id=job.id)
     assert total == 1
