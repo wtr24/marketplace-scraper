@@ -292,6 +292,187 @@
   </div>
 </div>
 
+<!-- ── Scrape History ──────────────────────────────────────────────────────── -->
+<div x-show="activeTab === 'history'" class="max-w-[1600px] mx-auto px-6 py-8">
+
+  <div class="flex items-center justify-between mb-6">
+    <h2 class="text-xl font-semibold text-gray-900">Scrape History</h2>
+    <button @click="historyOffset=0; loadHistory()"
+            class="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800">
+      <svg :class="historyLoading && 'spin'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>
+      Refresh
+    </button>
+  </div>
+
+  <!-- Per-site status cards -->
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-7">
+    <template x-for="s in historySummary" :key="s.site">
+      <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs font-semibold uppercase tracking-wide"
+                :class="{
+                  'text-blue-600':    s.site === 'ebay',
+                  'text-emerald-600': s.site === 'vinted',
+                  'text-rose-600':    s.site === 'depop',
+                }" x-text="s.site"></span>
+          <span class="text-xs font-medium px-2 py-0.5 rounded-full"
+                :class="s.lastOk === true  ? 'bg-emerald-100 text-emerald-700' :
+                         s.lastOk === false ? 'bg-red-100 text-red-600' :
+                                              'bg-gray-100 text-gray-400'"
+                x-text="s.lastOk === true ? '✓ OK' : s.lastOk === false ? '✗ Failed' : 'No runs'">
+          </span>
+        </div>
+        <p class="text-2xl font-semibold text-gray-900 mb-1" x-text="s.totalFound.toLocaleString()"></p>
+        <p class="text-xs text-gray-500">items found (this page)</p>
+        <div class="mt-3 pt-3 border-t border-gray-100 flex justify-between text-xs text-gray-500">
+          <span x-text="s.lastRun ? 'Last: ' + relativeTime(s.lastRun) : 'Never run'"></span>
+          <span x-show="s.successRate !== null" x-text="s.successRate + '% success'"></span>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Filter bar -->
+  <div class="flex flex-wrap gap-3 mb-5">
+    <select x-model="historyFilter.site" @change="historyOffset=0; loadHistory()"
+            class="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <option value="">All Sites</option>
+      <option value="ebay">eBay</option>
+      <option value="vinted">Vinted</option>
+      <option value="depop">Depop</option>
+    </select>
+    <select x-model="historyFilter.engine" @change="historyOffset=0; loadHistory()"
+            class="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <option value="">All Engines</option>
+      <template x-for="e in engines" :key="e.id">
+        <option :value="e.id" x-text="e.id"></option>
+      </template>
+    </select>
+    <select x-model="historyFilter.success" @change="historyOffset=0; loadHistory()"
+            class="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <option value="">All Statuses</option>
+      <option value="true">Success only</option>
+      <option value="false">Failed only</option>
+    </select>
+    <span class="ml-auto text-sm text-gray-500 self-center"
+          x-text="historyTotal + ' total runs'"></span>
+  </div>
+
+  <!-- Table -->
+  <div class="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+    <template x-if="history.length === 0 && !historyLoading">
+      <div class="p-12 text-center text-gray-500 text-sm">
+        <svg class="w-10 h-10 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+        </svg>
+        No scrape history yet — run a job to see results here.
+      </div>
+    </template>
+    <div x-show="historyLoading && history.length === 0" class="p-12 text-center text-gray-400 text-sm">Loading…</div>
+    <table x-show="history.length > 0" class="w-full text-sm">
+      <thead class="border-b border-gray-100 bg-gray-50">
+        <tr class="text-xs font-medium text-gray-500">
+          <th class="text-left px-5 py-3">When</th>
+          <th class="text-left px-5 py-3">Search Term</th>
+          <th class="text-left px-5 py-3">Site</th>
+          <th class="text-left px-5 py-3">Engine</th>
+          <th class="text-left px-5 py-3">Status</th>
+          <th class="text-right px-5 py-3">Found</th>
+          <th class="text-right px-5 py-3">New</th>
+          <th class="text-right px-5 py-3">Duration</th>
+          <th class="text-right px-5 py-3">Memory</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        <template x-for="r in history" :key="r.id">
+          <tr :class="r.success ? 'hover:bg-gray-50' : 'bg-red-50 hover:bg-red-100'" class="transition-colors">
+
+            <!-- When -->
+            <td class="px-5 py-3 text-gray-500 text-xs whitespace-nowrap" x-text="relativeTime(r.run_at)"></td>
+
+            <!-- Search term -->
+            <td class="px-5 py-3 font-medium text-gray-900 max-w-[160px] truncate" x-text="r.search_term"></td>
+
+            <!-- Site badge -->
+            <td class="px-5 py-3">
+              <span class="text-xs font-medium px-2 py-0.5 rounded capitalize"
+                    :class="{
+                      'bg-blue-100 text-blue-700':    r.site === 'ebay',
+                      'bg-emerald-100 text-emerald-700': r.site === 'vinted',
+                      'bg-rose-100 text-rose-700':    r.site === 'depop',
+                      'bg-gray-100 text-gray-600':    !['ebay','vinted','depop'].includes(r.site),
+                    }" x-text="r.site || '—'"></span>
+            </td>
+
+            <!-- Engine badge -->
+            <td class="px-5 py-3">
+              <span class="text-xs font-medium px-2 py-0.5 rounded bg-blue-50 text-blue-700" x-text="r.engine || '—'"></span>
+            </td>
+
+            <!-- Status -->
+            <td class="px-5 py-3">
+              <template x-if="r.success">
+                <span class="inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
+                  <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                  OK
+                </span>
+              </template>
+              <template x-if="!r.success">
+                <span class="inline-flex items-center gap-1 text-xs font-medium text-red-600" :title="r.error_message">
+                  <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+                  Failed
+                </span>
+              </template>
+            </td>
+
+            <!-- Items found -->
+            <td class="px-5 py-3 text-right font-mono text-gray-700" x-text="r.items_found ?? '—'"></td>
+
+            <!-- Items new -->
+            <td class="px-5 py-3 text-right font-mono"
+                :class="(r.items_new > 0) ? 'text-emerald-600 font-semibold' : 'text-gray-400'"
+                x-text="r.items_new != null ? '+' + r.items_new : '—'"></td>
+
+            <!-- Duration -->
+            <td class="px-5 py-3 text-right text-gray-500 text-xs whitespace-nowrap"
+                x-text="r.duration_ms ? (r.duration_ms >= 1000 ? (r.duration_ms/1000).toFixed(1)+'s' : r.duration_ms+'ms') : '—'"></td>
+
+            <!-- Memory -->
+            <td class="px-5 py-3 text-right text-gray-500 text-xs whitespace-nowrap"
+                x-text="r.memory_mb ? r.memory_mb.toFixed(0)+' MB' : '—'"></td>
+          </tr>
+
+          <!-- Error message row -->
+          <template x-if="!r.success && r.error_message">
+            <tr :class="r.success ? '' : 'bg-red-50'">
+              <td colspan="9" class="px-5 pb-2 text-xs text-red-600 font-mono truncate max-w-0" x-text="r.error_message"></td>
+            </tr>
+          </template>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  <div x-show="historyTotal > historyLimit" class="flex justify-center items-center gap-3 mt-6">
+    <button @click="historyOffset = Math.max(0, historyOffset - historyLimit); loadHistory()"
+            :disabled="historyOffset === 0"
+            class="bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-40 text-sm px-4 py-2 rounded-lg transition-colors">
+      ← Prev
+    </button>
+    <span class="text-sm text-gray-500"
+          x-text="'Page ' + (Math.floor(historyOffset / historyLimit) + 1) + ' of ' + Math.ceil(historyTotal / historyLimit)">
+    </span>
+    <button @click="historyOffset += historyLimit; loadHistory()"
+            :disabled="historyOffset + historyLimit >= historyTotal"
+            class="bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-40 text-sm px-4 py-2 rounded-lg transition-colors">
+      Next →
+    </button>
+  </div>
+</div>
+
 <!-- ── Benchmark ───────────────────────────────────────────────────────────── -->
 <div x-show="activeTab === 'benchmark'" class="max-w-6xl mx-auto px-6 py-8">
   <h2 class="text-xl font-semibold text-gray-900 mb-6">Benchmark Runner</h2>
@@ -545,6 +726,7 @@ function app() {
       { id: 'dashboard', label: 'Dashboard' },
       { id: 'listings',  label: 'Listings'  },
       { id: 'jobs',      label: 'Jobs'       },
+      { id: 'history',   label: 'History'    },
       { id: 'benchmark', label: 'Benchmark'  },
       { id: 'settings',  label: 'Settings'   },
     ],
@@ -575,6 +757,14 @@ function app() {
     listingsSearch: '',
     listingsFilter: { site: '', job_id: '', min_price: null, max_price: null, sort: 'newest' },
 
+    // History
+    history: [],
+    historyTotal: 0,
+    historyOffset: 0,
+    historyLimit: 50,
+    historyFilter: { site: '', engine: '', success: '' },
+    historyLoading: false,
+
     // Settings
     settings: { discord_webhook_url: '', discord_configured: false },
     settingsSaving: false,
@@ -589,7 +779,9 @@ function app() {
       setInterval(() => this.loadStats(), 30000);
       this.$watch('activeTab', val => {
         if (val === 'listings' && this.listings.length === 0) this.loadListings();
+        if (val === 'history') this.loadHistory();
       });
+      setInterval(() => { if (this.activeTab === 'history') this.loadHistory(); }, 30000);
     },
 
     async api(method, path, body) {
@@ -617,6 +809,36 @@ function app() {
         if (this.engines.length) this.jobForm.engine = this.engines[0].id;
       } catch {}
     },
+    async loadHistory() {
+      this.historyLoading = true;
+      try {
+        const f = this.historyFilter;
+        const params = new URLSearchParams({ limit: this.historyLimit, offset: this.historyOffset });
+        if (f.site)    params.set('site', f.site);
+        if (f.engine)  params.set('engine', f.engine);
+        if (f.success !== '') params.set('success', f.success);
+        const data = await this.api('GET', '/results?' + params);
+        this.history = data.results;
+        this.historyTotal = data.total;
+      } catch (e) { this.showToast('Failed to load history: ' + e.message, 'error'); }
+      finally { this.historyLoading = false; }
+    },
+
+    get historySummary() {
+      const sites = ['vinted', 'ebay', 'depop'];
+      return sites.map(s => {
+        const runs = this.history.filter(r => r.site === s);
+        const last = runs[0];
+        return {
+          site: s,
+          lastRun: last ? last.run_at : null,
+          lastOk: last ? last.success : null,
+          totalFound: runs.reduce((a, r) => a + (r.items_found || 0), 0),
+          successRate: runs.length ? Math.round(runs.filter(r => r.success).length / runs.length * 100) : null,
+        };
+      });
+    },
+
     async loadListings() {
       try {
         const f = this.listingsFilter;

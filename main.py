@@ -228,9 +228,19 @@ async def get_listings(
 # Scraper Results
 
 @app.get("/api/results")
-async def get_results(job_id: Optional[int] = None, limit: int = 100):
-    results = await db.get_scraper_results(job_id=job_id, limit=limit)
-    return [r.to_dict() for r in results]
+async def get_results(
+    job_id: Optional[int] = None,
+    site: Optional[str] = None,
+    engine: Optional[str] = None,
+    success: Optional[bool] = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    results, total = await db.get_scraper_results(
+        job_id=job_id, site=site, engine=engine, success=success,
+        limit=limit, offset=offset,
+    )
+    return {"total": total, "offset": offset, "limit": limit, "results": results}
 
 
 # Benchmark

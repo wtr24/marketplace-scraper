@@ -224,14 +224,51 @@ class Database:
             return sr
 
     async def get_scraper_results(
-        self, job_id: Optional[int] = None, limit: int = 100
-    ) -> list[ScraperResult]:
+        self,
+        job_id: Optional[int] = None,
+        site: Optional[str] = None,
+        engine: Optional[str] = None,
+        success: Optional[bool] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Return (rows, total) where each row is a dict enriched with job.search_term."""
         async with self.SessionLocal() as session:
-            stmt = select(ScraperResult).order_by(desc(ScraperResult.run_at)).limit(limit)
-            if job_id:
-                stmt = stmt.where(ScraperResult.job_id == job_id)
-            result = await session.execute(stmt)
-            return list(result.scalars().all())
+            base = (
+                select(ScraperResult, Job.search_term)
+                .outerjoin(Job, ScraperResult.job_id == Job.id)
+            )
+            count_base = (
+                select(func.count())
+                .select_from(ScraperResult)
+                .outerjoin(Job, ScraperResult.job_id == Job.id)
+            )
+
+            filters = []
+            if job_id is not None:
+                filters.append(ScraperResult.job_id == job_id)
+            if site:
+                filters.append(ScraperResult.site == site)
+            if engine:
+                filters.append(ScraperResult.engine == engine)
+            if success is not None:
+                filters.append(ScraperResult.success == success)
+
+            if filters:
+                base = base.where(*filters)
+                count_base = count_base.where(*filters)
+
+            total = await session.scalar(count_base)
+            rows = await session.execute(
+                base.order_by(desc(ScraperResult.run_at)).limit(limit).offset(offset)
+            )
+
+            results = []
+            for sr, search_term in rows:
+                d = sr.to_dict()
+                d["search_term"] = search_term or "—"
+                results.append(d)
+            return results, (total or 0)
 
     # ─── Dashboard Stats ────────────────────────────────────────────────────
 
