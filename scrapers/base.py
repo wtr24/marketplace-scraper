@@ -124,14 +124,16 @@ def random_headers(profile: Optional[BrowserProfile] = None) -> dict[str, str]:
 
 # ─── Proxy Pool ───────────────────────────────────────────────────────────────
 
-# Free proxy sources — top Reddit-recommended (r/webscraping, r/Python)
+# Free proxy sources — top Reddit-recommended (r/webscraping, r/Python, r/ProxyLists)
 _FREE_PROXY_SOURCES: list[str] = [
-    # ProxyScrape API — most recommended on Reddit
-    "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",
+    # ProxyScrape API v4 — most recommended on Reddit, updated every 5 min
+    "https://api.proxyscrape.com/v4/free-proxy-list/get?request=displayproxies&protocol=http&timeout=10000&anonymity=elite,anonymous",
+    # Proxifly GitHub — 4000+ proxies, updated every 5 min (community favourite)
+    "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt",
     # TheSpeedX GitHub — massive community-maintained list
     "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
-    # proxy-list.download API
-    "https://www.proxy-list.download/api/v1/get?type=http",
+    # Geonode JSON API — structured, recently verified proxies
+    "https://proxylist.geonode.com/api/proxy-list?limit=200&page=1&sort_by=lastChecked&sort_type=desc&protocols=http",
     # clarketm curated list
     "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
 ]
@@ -221,7 +223,21 @@ class ProxyPool:
             for source_url in _FREE_PROXY_SOURCES:
                 try:
                     resp = await client.get(source_url)
-                    if resp.status_code == 200:
+                    if resp.status_code != 200:
+                        continue
+                    # Geonode returns JSON; everything else is plain text host:port
+                    ct = resp.headers.get("content-type", "")
+                    if "json" in ct:
+                        try:
+                            data = resp.json()
+                            for entry in data.get("data", []):
+                                ip   = entry.get("ip", "")
+                                port = str(entry.get("port", ""))
+                                if ip and port.isdigit():
+                                    raw_proxies.append(f"http://{ip}:{port}")
+                        except Exception:
+                            pass
+                    else:
                         for line in resp.text.splitlines():
                             line = line.strip().split()[0] if line.strip() else ""
                             if not line or line.startswith("#"):
@@ -230,7 +246,7 @@ class ProxyPool:
                                 host, port = line.rsplit(":", 1)
                                 if host and port.isdigit():
                                     raw_proxies.append(f"http://{line}")
-                        logger.debug(f"[proxy/refresh] {source_url[:55]}… OK")
+                    logger.debug(f"[proxy/refresh] {source_url[:55]}… OK")
                 except Exception as exc:
                     logger.warning(f"[proxy/refresh] Source failed: {source_url[:55]}… — {exc}")
 
