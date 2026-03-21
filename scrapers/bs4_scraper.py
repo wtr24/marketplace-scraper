@@ -4,6 +4,7 @@ Uses curl_cffi when available for browser-grade TLS fingerprinting (JA3/JA4),
 which defeats the most common HTTP-layer bot detections.  Falls back to httpx
 if curl_cffi is not installed.
 """
+import asyncio
 import logging
 from typing import Any
 
@@ -52,6 +53,15 @@ class BS4Scraper(BaseScraper):
 
         if site == "depop":
             raise RuntimeError("Depop requires Playwright (JS-rendered, raw HTTP 403). Use playwright engine.")
+
+        # Auto-refresh proxy pool if empty or stale (best-effort, non-blocking)
+        if proxy_pool.needs_refresh():
+            try:
+                await asyncio.wait_for(proxy_pool.refresh(max_validate=15), timeout=60)
+            except asyncio.TimeoutError:
+                logger.warning("[bs4] Proxy refresh timed out — proceeding without proxy")
+            except Exception as exc:
+                logger.warning(f"[bs4] Proxy refresh error: {exc}")
 
         url = site_mod.build_url(search_term)
         await random_delay(1, 4)

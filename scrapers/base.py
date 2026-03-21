@@ -124,30 +124,59 @@ def random_headers(profile: Optional[BrowserProfile] = None) -> dict[str, str]:
 
 # ─── Proxy Pool ───────────────────────────────────────────────────────────────
 
+# Free proxy sources — top Reddit-recommended (r/webscraping, r/Python)
+_FREE_PROXY_SOURCES: list[str] = [
+    # ProxyScrape API — most recommended on Reddit
+    "https://api.proxyscrape.com/v3/free-proxy-list/get?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",
+    # TheSpeedX GitHub — massive community-maintained list
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+    # proxy-list.download API
+    "https://www.proxy-list.download/api/v1/get?type=http",
+    # clarketm curated list
+    "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
+]
+
+# Neutral URL used to validate that a proxy actually works
+_VALIDATE_URL = "http://httpbin.org/ip"
+
+
 class ProxyPool:
-    """Round-robin proxy rotation with automatic failure backoff.
+    """Round-robin proxy rotation with automatic failure backoff and auto-refresh.
 
-    Configure via PROXY_URLS env var — comma-separated list:
-        PROXY_URLS=http://user:pass@host1:port,http://user:pass@host2:port
+    Configure via PROXY_URLS env var (comma-separated):
+        PROXY_URLS=http://user:pass@host1:port,socks5://host2:port
 
-    Supports http://, https://, socks5:// schemes.
+    If PROXY_URLS is empty, auto-fetches and validates free proxies from
+    community-maintained public lists (Reddit-recommended sources).
+    Refreshes the pool every 20 minutes automatically.
     """
 
-    _COOLDOWN_SECONDS = 300  # 5 min before a failed proxy is retried
+    _COOLDOWN_SECONDS = 300   # 5 min before a failed proxy is retried
+    _REFRESH_INTERVAL = 1200  # 20 min between auto-refreshes
 
     def __init__(self):
         raw = os.getenv("PROXY_URLS", "").strip()
-        self._proxies: list[str] = [p.strip() for p in raw.split(",") if p.strip()] if raw else []
+        self._static: list[str] = [p.strip() for p in raw.split(",") if p.strip()] if raw else []
+        self._proxies: list[str] = list(self._static)
         self._index = 0
         self._failures: dict[str, float] = {}  # proxy_url → failed_at timestamp
+        self._last_refresh: float = 0.0
+        self._refreshing: bool = False
         if self._proxies:
-            logger.info(f"[proxy] Pool initialised with {len(self._proxies)} proxy/proxies")
+            logger.info(f"[proxy] Pool initialised with {len(self._proxies)} static proxy/proxies")
         else:
-            logger.debug("[proxy] No PROXY_URLS configured — direct connections only")
+            logger.info("[proxy] No PROXY_URLS set — will auto-fetch free proxies on refresh")
 
     @property
     def available(self) -> bool:
         return bool(self._proxies)
+
+    def needs_refresh(self) -> bool:
+        """True if pool is empty or the refresh interval has elapsed (and not already refreshing)."""
+        if self._refreshing:
+            return False
+        elapsed = time.monotonic() - self._last_refresh
+        return not self._proxies or elapsed > self._REFRESH_INTERVAL
 
     def get(self) -> Optional[str]:
         """Return next working proxy, or None if pool is empty or all on cooldown."""
@@ -165,6 +194,91 @@ class ProxyPool:
     def mark_failed(self, proxy: str):
         logger.warning(f"[proxy] Marking {proxy[:30]}… as failed (cooldown {self._COOLDOWN_SECONDS}s)")
         self._failures[proxy] = time.monotonic()
+        # Remove from active pool immediately — saves wasting rotation slots
+        self._proxies = [p for p in self._proxies if p != proxy]
+
+    async def refresh(self, max_validate: int = 30) -> int:
+        """Fetch and validate free proxies from public sources. Returns count added.
+
+        Safe to call concurrently — only one refresh runs at a time.
+        """
+        if self._refreshing:
+            logger.debug("[proxy/refresh] Already refreshing — skipping")
+            return 0
+        self._refreshing = True
+        try:
+            return await self._do_refresh(max_validate)
+        finally:
+            self._refreshing = False
+            self._last_refresh = time.monotonic()
+
+    async def _do_refresh(self, max_validate: int) -> int:
+        import httpx
+
+        raw_proxies: list[str] = []
+        logger.info("[proxy/refresh] Fetching free proxy lists…")
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            for source_url in _FREE_PROXY_SOURCES:
+                try:
+                    resp = await client.get(source_url)
+                    if resp.status_code == 200:
+                        for line in resp.text.splitlines():
+                            line = line.strip().split()[0] if line.strip() else ""
+                            if not line or line.startswith("#"):
+                                continue
+                            if ":" in line:
+                                host, port = line.rsplit(":", 1)
+                                if host and port.isdigit():
+                                    raw_proxies.append(f"http://{line}")
+                        logger.debug(f"[proxy/refresh] {source_url[:55]}… OK")
+                except Exception as exc:
+                    logger.warning(f"[proxy/refresh] Source failed: {source_url[:55]}… — {exc}")
+
+        if not raw_proxies:
+            logger.warning("[proxy/refresh] No proxies fetched from any source")
+            return 0
+
+        # Deduplicate and shuffle so we don't always test the same proxies first
+        candidates = list(dict.fromkeys(raw_proxies))
+        random.shuffle(candidates)
+        candidates = candidates[: max_validate * 4]  # over-sample to hit target
+
+        logger.info(f"[proxy/refresh] Validating {len(candidates)} candidates (target {max_validate})…")
+        sem = asyncio.Semaphore(20)  # 20 concurrent validation requests
+
+        async def _check(proxy_url: str) -> Optional[str]:
+            async with sem:
+                try:
+                    async with httpx.AsyncClient(
+                        proxies=proxy_url,
+                        timeout=8,
+                        follow_redirects=False,
+                    ) as c:
+                        r = await c.get(_VALIDATE_URL)
+                        if r.status_code == 200:
+                            return proxy_url
+                except Exception:
+                    pass
+                return None
+
+        results = await asyncio.gather(*[_check(p) for p in candidates], return_exceptions=True)
+        validated: list[str] = [r for r in results if isinstance(r, str)][:max_validate]
+
+        if validated:
+            # Static (paid/configured) proxies always kept at the front
+            self._proxies = list(self._static) + validated
+            random.shuffle(self._proxies)
+            self._index = 0
+            # Drop stale failure records for proxies no longer in pool
+            self._failures = {k: v for k, v in self._failures.items() if k in self._proxies}
+            logger.info(
+                f"[proxy/refresh] Pool updated — {len(validated)} working free proxies "
+                f"(total pool: {len(self._proxies)})"
+            )
+        else:
+            logger.warning("[proxy/refresh] No proxies passed validation — keeping existing pool")
+
+        return len(validated)
 
 
 # Module-level singleton — imported by both scrapers

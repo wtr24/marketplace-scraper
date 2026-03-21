@@ -47,6 +47,16 @@ class PlaywrightScraper(BaseScraper):
         site_mod = get_site(site)
         url = site_mod.build_url(search_term)
         profile = random_profile()
+
+        # Auto-refresh proxy pool if empty or stale (non-blocking — best effort)
+        if proxy_pool.needs_refresh():
+            try:
+                await asyncio.wait_for(proxy_pool.refresh(max_validate=15), timeout=60)
+            except asyncio.TimeoutError:
+                logger.warning("[playwright] Proxy refresh timed out — proceeding without proxy")
+            except Exception as exc:
+                logger.warning(f"[playwright] Proxy refresh error: {exc}")
+
         proxy = proxy_pool.get()
 
         async with async_playwright() as p:

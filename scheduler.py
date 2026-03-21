@@ -33,8 +33,17 @@ def start():
             max_instances=1,
             coalesce=True,
         )
+        scheduler.add_job(
+            _refresh_proxies,
+            trigger=IntervalTrigger(minutes=20, timezone="UTC"),
+            id="proxy_refresh",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            next_run_time=datetime.now(timezone.utc),  # run immediately on startup
+        )
         scheduler.start()
-        logger.info("Scheduler started — polling every 5 minutes")
+        logger.info("Scheduler started — scraper every 5 min, proxy refresh every 20 min")
 
 
 def stop():
@@ -60,6 +69,19 @@ async def run_job_now(job_id: int):
         raise ValueError(f"Job {job_id} not found")
 
     asyncio.create_task(_execute_job(job))
+
+
+async def _refresh_proxies():
+    """Fetch and validate free proxies — runs at startup and every 20 min."""
+    from scrapers.base import proxy_pool
+    try:
+        count = await proxy_pool.refresh(max_validate=30)
+        if count:
+            logger.info(f"[proxy] Refresh complete — {count} working proxies in pool")
+        else:
+            logger.warning("[proxy] Refresh yielded no working proxies")
+    except Exception as exc:
+        logger.error(f"[proxy] Refresh failed: {exc}", exc_info=True)
 
 
 async def _run_all_active_jobs():
