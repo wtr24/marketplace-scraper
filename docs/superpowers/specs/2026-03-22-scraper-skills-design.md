@@ -7,18 +7,24 @@
 
 ## Overview
 
-4 project-local Claude Code skills stored in `.claude/commands/` that wire together into an orchestrator-first workflow. Every task flows through the orchestrator, which refines the prompt, decomposes the task, manages agent teams, and auto-triggers supporting skills at the right moments.
+4 project-local Claude Code skills stored in `.claude/commands/` that wire together into an orchestrator-first workflow. Every task flows through the orchestrator, which refines the prompt, decomposes the task, manages agent teams, and directs supporting skills at the right moments.
+
+**Important:** Claude Code skills are prompt files — they cannot programmatically invoke each other. "Auto-triggering" means the orchestrator's instructions explicitly direct the model to run the named skill as the next step in its output. There is no hidden runtime mechanism; the orchestrator skill text instructs the model to say "now run /context-optimizer" or "now run /scraper-memory" at the appropriate point.
 
 ---
 
 ## Skills
 
-| Skill | File | Trigger |
-|---|---|---|
-| `scraper-orchestrator` | `.claude/commands/scraper-orchestrator.md` | Manual — every task |
-| `scraper-research` | `.claude/commands/scraper-research.md` | Auto (orchestrator) or manual |
-| `scraper-memory` | `.claude/commands/scraper-memory.md` | Auto (on phase complete) |
-| `context-optimizer` | `.claude/commands/context-optimizer.md` | Auto (context threshold) |
+| Skill | File | Trigger | Mode |
+|---|---|---|---|
+| `scraper-orchestrator` | `.claude/commands/scraper-orchestrator.md` | Manual — every task | Interactive |
+| `scraper-research` | `.claude/commands/scraper-research.md` | Directed by orchestrator, or manual | Non-interactive when orchestrated |
+| `scraper-memory` | `.claude/commands/scraper-memory.md` | Directed by orchestrator, or manual | Non-interactive when orchestrated |
+| `context-optimizer` | `.claude/commands/context-optimizer.md` | Directed by orchestrator, or manual | Non-interactive when orchestrated |
+
+**Standalone vs orchestrated mode:**
+- Standalone (manual invocation): each skill shows proposed output and waits for user approval before writing anything
+- Orchestrated (directed by orchestrator): skills skip the approval gate and execute directly, since the orchestrator step already had the user's intent confirmed at the prompt-refinement stage
 
 ---
 
@@ -30,52 +36,71 @@ User raw input
       ▼
 scraper-orchestrator
   ├── Step 1: Prompt Optimizer
-  │     - Infers intent from context (git history, CLAUDE.md, memory)
+  │     - Reads CLAUDE.md global spec, recent git log, memory files
   │     - Rewrites as precise task brief
-  │     - Shows rewrite → user approves or corrects
+  │     - Shows rewrite → user approves or corrects (only approval gate)
   ├── Step 2: Task Decomposition
   │     - Breaks into atomic sub-tasks
   │     - Scores each: complexity / unknowns / parallelisable?
   │     - Decides team composition
   ├── Step 3: Context Health Check
-  │     - Estimates current context load
-  │     - If degraded → triggers context-optimizer first
+  │     - Estimates context load (see heuristic below)
+  │     - If degraded → directs model to run /context-optimizer
   ├── Step 4: Spawn Agent Team
-  │     - Researcher agents (if unknowns) ← scraper-research
+  │     - If unknowns → directs model to run /scraper-research first
   │     - Planner agent ← writes implementation plan
   │     - Executor agent(s) ← parallel where independent
   │     - Each agent: isolated context, only relevant files
   └── Step 5: Synthesise + Memory
-        - Combines agent outputs
-        - Triggers scraper-memory on completion
+        - Combines agent outputs into coherent result
+        - Directs model to run /scraper-memory
 ```
 
 ---
 
 ## Skill 1: `scraper-orchestrator`
 
-**Role:** Master entry point. Takes raw user input, optimises it, decomposes it, builds an agent team, coordinates execution, synthesises output, triggers memory update.
+**Role:** Master entry point. Takes raw user input, optimises it, decomposes it, builds an agent team, coordinates execution, synthesises output, directs memory update.
 
-**Prompt Optimizer behaviour:**
-- Reads `CLAUDE.md` global spec, recent git log, and memory files before rewriting
-- Fills in ambiguity using project context (e.g. "proxy thing" → identifies current proxy implementation)
-- Shows rewrite explicitly, waits for approval before proceeding
-- If user corrects, re-refines once more
+### Step 1: Prompt Optimizer
 
-**Task Decomposition algorithm:**
+- Reads `CLAUDE.md` global spec, `git log --oneline -10`, and memory files before rewriting
+- Fills in ambiguity using project context (e.g. "proxy thing" → identifies current proxy implementation from scheduler.py and proxy pool)
+- Shows rewrite explicitly — this is the **only user approval gate** in the orchestrator flow
+- If user corrects, re-refines once more then proceeds
+
+### Step 2: Task Decomposition
+
 - Each sub-task must be: atomic, independently verifiable, assignable to one agent
-- Score per sub-task: `Complexity (1-3) × Unknown Factor (1-2) × Parallelisable (bool)`
-- High-unknown sub-tasks → spawn researcher first, block executor until complete
-- Parallelisable sub-tasks → spawn simultaneously via Agent tool
+- Score per sub-task: `Complexity (1-3) × Unknown Factor (1-2)`
+- High-unknown sub-tasks (score ≥ 4) → direct /scraper-research first, block executor until complete
+- Independent sub-tasks → spawn via Agent tool simultaneously
 
-**Context Health Check:**
-- After every agent synthesis, estimate token usage
-- If > 60% of context window → trigger `context-optimizer` before next spawn
-- If > 85% → force checkpoint and recommend fresh session
+### Step 3: Context Health Check
 
-**Agent isolation:**
-- Each agent receives: sub-task description, relevant file paths only, no session history
-- Agents communicate results back via structured output, not conversation
+**Context load heuristic** (no native API available — estimated from observable signals):
+```
+EstimatedLoad =
+  (number of files read this session × 200 tokens avg)
+  + (number of tool calls × 150 tokens avg)
+  + (number of assistant messages × 300 tokens avg)
+  / 200,000 (Claude Sonnet context window)
+
+If EstimatedLoad > 0.60 → direct model to run /context-optimizer
+If EstimatedLoad > 0.85 → force checkpoint, output recommendation to start fresh session
+```
+This is a conservative estimate. When in doubt, err toward triggering the optimizer.
+
+### Step 4: Agent Isolation
+
+- Each agent receives: sub-task description + explicit list of relevant file paths + no session history
+- Agents return structured output (status, findings, files changed, next steps)
+- Orchestrator synthesises all outputs before proceeding to Step 5
+
+### Step 5: Directed Memory Update
+
+At completion, orchestrator outputs: `"Task complete. Running /scraper-memory to log outcomes."`
+The model then follows the scraper-memory skill in non-interactive mode.
 
 ---
 
@@ -83,41 +108,71 @@ scraper-orchestrator
 
 **Role:** Deep research into anti-bot evasion for Vinted/eBay/Depop. Surfaces techniques, packages, builds a scored algorithm, generates test plan.
 
-**Parallel research agents (Step 1):**
-- Agent A — Detection analysis: What each target site uses (TLS fingerprint, JS challenges, behavioural analysis, IP reputation scoring, CAPTCHA type)
-- Agent B — Evasion techniques: Current best-in-class methods + Python/Node packages (playwright-stealth, curl-impersonate, fingerprint-suite, etc.)
-- Agent C — Proxy landscape: Residential vs datacenter vs rotating, free vs paid, survival rate per site
+### Step 1: Parallel Research Agents
 
-**Gap analysis (Step 2):**
-- Compares research findings against current repo implementation
-- Outputs: "You have X, missing Y, Z is outdated"
-- Prioritised by impact
+Three agents spawned simultaneously:
+- **Agent A** — Detection analysis: What each target site uses (TLS fingerprint, JS challenges, behavioural analysis, IP reputation scoring, CAPTCHA type)
+- **Agent B** — Evasion techniques: Current best-in-class methods + Python/Node packages (playwright-stealth, curl-impersonate, fingerprint-suite, etc.)
+- **Agent C** — Proxy landscape: Residential vs datacenter vs rotating, free vs paid, survival rate per site
 
-**Evasion Algorithm (Step 3):**
+### Step 2: Gap Analysis
+
+- Compares Agent A+B findings against current repo implementation (reads scrapers/, sites/, scheduler.py)
+- Outputs table: `| Technique | Have it? | Quality | Priority to improve |`
+- Prioritised by estimated impact on ban rate
+
+### Step 3: Evasion Algorithm
+
+Per-site scoring formula with weights derived from Agent A's detection findings for that site:
+
 ```
-VintedEvasionScore = (ProxyScore × 0.35) + (FingerprintScore × 0.35)
-                   + (BehaviourScore × 0.20) + (TimingScore × 0.10)
+EvasionScore(site) = (ProxyScore × W_proxy)
+                   + (FingerprintScore × W_fp)
+                   + (BehaviourScore × W_beh)
+                   + (TimingScore × W_timing)
+
+Where W_proxy + W_fp + W_beh + W_timing = 1.0
+
+Weights are derived per site based on what Agent A found:
+- If site primarily uses IP reputation → W_proxy = 0.5, others share remaining 0.5
+- If site primarily uses TLS/browser fingerprint → W_fp = 0.5, others share 0.5
+- Default fallback weights: W_proxy=0.35, W_fp=0.35, W_beh=0.20, W_timing=0.10
 ```
-- Produces ranked list of changes with expected impact per site
-- Same formula applied per site with site-specific weights
 
-**Plugin surfacing (Step 4):**
-- For each recommended technique → best package, version, install command, known caveats
-- Flags packages that conflict with existing requirements.txt
+Produces ranked list of changes with expected score improvement per site.
 
-**Test plan (Step 5):**
-- Per-site verification test: success rate, time-to-block, listings captured
-- Regression test: ensure existing working scrapers not broken by changes
+### Step 4: Plugin Surfacing
+
+For each recommended technique:
+- Best package name, version, pip/npm install command
+- Known caveats (maintenance status, platform compatibility)
+- Flags any conflict with existing `requirements.txt`
+
+### Step 5: Test Plan
+
+Per-site verification: success rate target, time-to-block baseline, listings captured metric.
+Regression check: confirm existing passing scrapers still work after changes.
 
 ---
 
 ## Skill 3: `scraper-memory`
 
-**Role:** Updates `CLAUDE.md` after significant task completion. Two-layer structure.
+**Role:** Updates `CLAUDE.md` after task completion. Two-layer structure.
 
-### Layer 1 — Global Spec (top of CLAUDE.md, living document)
+### What counts as a "significant task"
 
-Updated only when: strategy changes, new site added, major problem resolved or opened.
+Layer 2 entry is written when ANY of:
+- A scraper bug was fixed or a new feature was added (git diff is non-empty)
+- A scrape was run and produced measurable results (success or failure)
+- A new technique, package, or approach was tested
+
+Layer 1 (global spec) is updated when ANY of:
+- Primary engine for a site changed
+- A new site was added or removed
+- A problem was resolved that was in Open Problems
+- A new persistent problem was discovered
+
+### Layer 1 — Global Spec (top of CLAUDE.md)
 
 ```markdown
 ## Project Goal
@@ -128,14 +183,13 @@ Updated only when: strategy changes, new site added, major problem resolved or o
 
 ## Sites Status
 | Site | Engine | Status | Last Issue |
+|------|--------|--------|------------|
 
 ## Open Problems
 - [ ] item
 ```
 
-### Layer 2 — Session Log (append-only)
-
-Appended after every significant task.
+### Layer 2 — Session Log (append-only below Layer 1)
 
 ```markdown
 ## Session: YYYY-MM-DD — [task name]
@@ -149,10 +203,10 @@ Appended after every significant task.
 ```
 
 **Behaviour:**
-- Reads git diff + session context to draft entries
-- Never rewrites existing history — append only
-- Shows proposed changes, waits for approval before writing
-- Updates Layer 1 only if task changed strategy or site status
+- Reads `git diff HEAD~1`, recent errors from session context, scraper_results if accessible
+- In standalone mode: shows proposed CLAUDE.md changes, waits for approval before writing
+- In orchestrated mode: writes directly without approval gate
+- Never rewrites existing Layer 2 history — append only
 
 ---
 
@@ -160,27 +214,30 @@ Appended after every significant task.
 
 **Role:** Detects and fixes context rot. Keeps context high-signal throughout long sessions.
 
-**Relevance Decay Scoring algorithm:**
+### Relevance Decay Scoring
+
 ```
 Score = (Recency × 0.4) + (Relevance × 0.4) + (Uniqueness × 0.2)
 
-Recency:    completed task = 0.1  |  active task = 1.0
-Relevance:  directly related to current task = 1.0  |  tangential = 0.3
-Uniqueness: already summarised elsewhere = 0.1  |  novel info = 1.0
+Recency:    completed task/topic = 0.1  |  active task = 1.0
+Relevance:  directly related to current task = 1.0  |  tangential = 0.3  |  unrelated = 0.0
+Uniqueness: already summarised or repeated elsewhere = 0.1  |  novel info = 1.0
 
-Score < 0.3  → prune (replace with 1-line summary)
-Score 0.3–0.6 → compress (key facts only)
+Score < 0.3  → prune: replace with single summary line
+Score 0.3–0.6 → compress: keep key facts, discard rationale
 Score > 0.6  → keep as-is
 ```
 
-**Output:**
-1. Context health report — score breakdown, what's rotting, estimated token usage
-2. Compressed checkpoint — all completed work in compact handoff block
-3. Reset recommendation if health < 40%
+### Output
 
-**Auto-trigger thresholds (set by orchestrator):**
-- > 60% context load → run optimizer
-- > 85% context load → force checkpoint, recommend fresh session
+1. **Context health report** — estimated load %, score breakdown per topic area, what's rotting
+2. **Compressed checkpoint** — all completed work condensed into a compact handoff block (target: <500 tokens)
+3. **Reset recommendation** — if estimated load > 85%, suggests starting fresh session carrying only the checkpoint
+
+### Trigger thresholds (directed by orchestrator)
+
+- Estimated load > 60% → run optimizer, continue in current session
+- Estimated load > 85% → force checkpoint output, recommend fresh session start
 
 ---
 
@@ -205,8 +262,14 @@ C:\scraper\
 
 ## Success Criteria
 
-- [ ] `/scraper-orchestrator` takes raw input, shows refined prompt, decomposes task, spawns agents, synthesises result
-- [ ] `/scraper-research` produces gap analysis + ranked evasion algorithm + plugin list for this repo
-- [ ] `/scraper-memory` writes structured CLAUDE.md entries with two-layer structure after each task
-- [ ] `/context-optimizer` scores context health and produces compressed checkpoint
-- [ ] All 4 skills work standalone AND wired through orchestrator
+**Individual skills:**
+- [ ] `/scraper-orchestrator` takes raw input, shows refined prompt, decomposes task, spawns agents, synthesises result, and directs /scraper-memory at completion
+- [ ] `/scraper-research` produces: gap analysis table, per-site evasion score with derived weights, ranked change list, plugin list with install commands
+- [ ] `/scraper-memory` writes two-layer CLAUDE.md: Layer 1 updated only on strategy change, Layer 2 appended after each significant task
+- [ ] `/context-optimizer` outputs: health report with estimated load %, compressed checkpoint under 500 tokens, reset recommendation when load > 85%
+
+**Inter-skill wiring (orchestrator-directed flow):**
+- [ ] When orchestrator encounters high-unknown sub-task, it directs /scraper-research before spawning executors
+- [ ] When orchestrator estimated context load exceeds 60%, it directs /context-optimizer before next agent spawn
+- [ ] When orchestrator completes final synthesis, it directs /scraper-memory in non-interactive mode
+- [ ] All 4 skills work correctly in both standalone (interactive) and orchestrated (non-interactive) modes
