@@ -32,3 +32,6 @@ fake-useragent>=1.5.1
 # Testing
 pytest==8.2.2
 pytest-asyncio==0.23.7
+
+# Classifier inference
+onnxruntime==1.18.1
