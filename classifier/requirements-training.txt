@@ -1,0 +1,6 @@
+# Install on local machine only — NOT on NAS
+# pip install -r classifier/requirements-training.txt
+--index-url https://download.pytorch.org/whl/cpu
+torch==2.3.1
+torchvision==0.18.1
+timm==1.0.9
