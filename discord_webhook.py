@@ -117,7 +117,7 @@ async def send_fleece_alert(listing: dict, webhook_url: str) -> bool:
     embed = _build_embed(listing)
     payload = {
         "username": "Fleece Alert",
-        "avatar_url": "https://i.imgur.com/AfFp7pu.png",
+        "avatar_url": "https://assets.stickpng.com/images/6130b76619b055000483bbaa.png",
         "embeds": [embed],
     }
 
@@ -164,7 +164,7 @@ async def send_test_alert(webhook_url: str) -> tuple[bool, str]:
         "condition": "Good",
         "brand": "Patagonia",
         "seller": "marketplace_scraper",
-        "image_url": "https://i.imgur.com/AfFp7pu.png",
+        "image_url": "https://assets.stickpng.com/images/6130b76619b055000483bbaa.png",
         "listing_url": None,
         "scraped_at": datetime.now(timezone.utc).isoformat(),
     }
