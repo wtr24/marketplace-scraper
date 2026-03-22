@@ -1,0 +1,43 @@
+{
+  "name": "Marketplace Scraper",
+  "short_name": "Scraper",
+  "description": "Real-time scraping analytics for eBay, Vinted & Depop",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "portrait-primary",
+  "background_color": "#f3f4f6",
+  "theme_color": "#111827",
+  "categories": ["utilities", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Listings",
+      "short_name": "Listings",
+      "url": "/?tab=listings",
+      "description": "Browse scraped listings",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Jobs",
+      "short_name": "Jobs",
+      "url": "/?tab=jobs",
+      "description": "Manage scraping jobs",
+      "icons": [{ "src": "/icons/icon.svg", "sizes": "any" }]
+    }
+  ]
+}

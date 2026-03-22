@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a5f"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="192" height="192" rx="40" fill="url(#bg)"/>
+
+  <!-- List rows — representing scraped listings -->
+  <circle cx="52" cy="72" r="6" fill="#374151"/>
+  <rect x="66" y="67" width="44" height="10" rx="5" fill="#374151"/>
+  <circle cx="52" cy="96" r="6" fill="#374151"/>
+  <rect x="66" y="91" width="34" height="10" rx="5" fill="#374151"/>
+  <circle cx="52" cy="120" r="6" fill="#374151"/>
+  <rect x="66" y="115" width="40" height="10" rx="5" fill="#374151"/>
+
+  <!-- Magnifying glass (search / scrape) -->
+  <circle cx="114" cy="108" r="30" fill="none" stroke="url(#ring)" stroke-width="11"/>
+  <line x1="135" y1="129" x2="155" y2="149" stroke="url(#ring)" stroke-width="11" stroke-linecap="round"/>
+
+  <!-- Highlight dot inside glass -->
+  <circle cx="105" cy="99" r="6" fill="#93c5fd" opacity="0.6"/>
+</svg>
