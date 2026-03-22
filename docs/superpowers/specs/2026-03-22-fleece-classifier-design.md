@@ -200,11 +200,17 @@ class FleeceClassifier:
         # Loads ONNX session if model_path exists, sets self.ready
         # Logs warning and sets ready=False if file missing
 
-    def classify(self, image_url: str, threshold: float = 0.35) -> dict:
+    async def classify(self, image_url: str, threshold: float = 0.35) -> dict:
+        # Async — safe to call directly from the async scheduler loop
+        # Downloads image via httpx AsyncClient (with 24h local cache)
+        # Runs ONNX inference in executor: await loop.run_in_executor(None, self._infer, arr)
         # Returns {want: bool, confidence: float}
-        # Image cached locally for 24h (data/classifier/cache/)
         # On image download failure: returns {want: True} (fail open)
         # On inference error: returns {want: True} (fail open)
+
+    def _infer(self, arr: np.ndarray) -> float:
+        # Synchronous ONNX inference — called via run_in_executor
+        # Returns want_probability float
 ```
 
 **`main.py` lifespan:**
@@ -218,13 +224,15 @@ classifier = FleeceClassifier("classifier/fleece_classifier.onnx")
 new_items = await db.upsert_listings(listings)
 
 if classifier.ready:
-    new_items = [
-        item for item in new_items
-        if classifier.classify(item.get("image_url"))["want"]
-    ]
+    results = await asyncio.gather(*[
+        classifier.classify(item.get("image_url")) for item in new_items
+    ])
+    new_items = [item for item, r in zip(new_items, results) if r["want"]]
 
 await send_fleece_alerts(new_items, webhook_url)
 ```
+
+Using `asyncio.gather` classifies all new listings concurrently — no event loop blocking.
 
 **Fallback behaviour:**
 - Model file missing → `ready=False` → keyword filter still runs as before
@@ -255,9 +263,9 @@ C:\scraper\
 
 **`.gitignore` additions:**
 ```
-data/classifier/
-classifier/fleece_classifier.onnx  # tracked separately after training
+data/classifier/        ← images + labels NOT committed (large binary files)
 ```
+`classifier/fleece_classifier.onnx` is **tracked in git** (not gitignored). Committing it is the deployment mechanism — push triggers GitHub Actions → Watchtower redeploys NAS with the new model file.
 
 ---
 
