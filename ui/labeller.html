@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fleece Labeller</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #fff; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #app { width: 420px; max-width: 100vw; padding: 16px; }
+  #header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  #progress-bar { background: #333; border-radius: 4px; height: 6px; margin-bottom: 16px; }
+  #progress-fill { background: #22c55e; height: 100%; border-radius: 4px; transition: width 0.3s; }
+  #image-wrap { position: relative; width: 100%; aspect-ratio: 1; background: #1a1a1a; border-radius: 12px; overflow: hidden; margin-bottom: 16px; }
+  #listing-img { width: 100%; height: 100%; object-fit: cover; }
+  #meta { text-align: center; margin-bottom: 20px; }
+  #title { font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
+  #sub { font-size: 0.85rem; color: #888; }
+  #buttons { display: flex; gap: 12px; }
+  .btn { flex: 1; padding: 14px; border: none; border-radius: 10px; font-size: 1rem; font-weight: 700; cursor: pointer; transition: transform 0.1s, opacity 0.1s; }
+  .btn:active { transform: scale(0.96); }
+  #btn-no { background: #ef4444; color: #fff; }
+  #btn-yes { background: #22c55e; color: #fff; }
+  #btn-skip { background: #374151; color: #9ca3af; flex: 0; padding: 14px 20px; font-size: 0.85rem; }
+  #done { text-align: center; padding: 40px; font-size: 1.2rem; color: #22c55e; display: none; }
+  .hint { font-size: 0.75rem; color: #555; text-align: center; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <span id="count-label" style="font-size:0.85rem;color:#888"></span>
+    <span id="eta" style="font-size:0.85rem;color:#555"></span>
+  </div>
+  <div id="progress-bar"><div id="progress-fill" style="width:0%"></div></div>
+  <div id="image-wrap"><img id="listing-img" src="" alt=""></div>
+  <div id="meta">
+    <div id="title"></div>
+    <div id="sub"></div>
+  </div>
+  <div id="buttons">
+    <button class="btn" id="btn-no" onclick="label('dont_want')">✗ DON'T WANT</button>
+    <button class="btn" id="btn-skip" onclick="label('skip')">Skip</button>
+    <button class="btn" id="btn-yes" onclick="label('want')">✓ WANT</button>
+  </div>
+  <div class="hint">← J = Don't Want &nbsp;|&nbsp; L → = Want &nbsp;|&nbsp; S = Skip</div>
+  <div id="done">✓ All labelled! Run train.py next.</div>
+</div>
+<script>
+let current = null;
+let startTime = Date.now();
+let labelled = 0;
+
+async function loadNext() {
+  const [nextResp, progResp] = await Promise.all([
+    fetch('/api/labeller/next'),
+    fetch('/api/labeller/progress')
+  ]);
+  const next = await nextResp.json();
+  const prog = await progResp.json();
+
+  labelled = prog.labelled;
+  const total = prog.total;
+  const pct = total > 0 ? Math.round((labelled / total) * 100) : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('count-label').textContent = `${labelled} / ${total} labelled`;
+
+  const elapsed = (Date.now() - startTime) / 1000;
+  const rate = labelled > 0 ? elapsed / labelled : null;
+  const remaining = total - labelled;
+  if (rate && remaining > 0) {
+    const eta = Math.round((rate * remaining) / 60);
+    document.getElementById('eta').textContent = `~${eta}m remaining`;
+  }
+
+  if (next.done) {
+    document.getElementById('image-wrap').style.display = 'none';
+    document.getElementById('meta').style.display = 'none';
+    document.getElementById('buttons').style.display = 'none';
+    document.getElementById('done').style.display = 'block';
+    return;
+  }
+
+  current = next;
+  document.getElementById('listing-img').src = next.image_url;
+  document.getElementById('title').textContent = next.title || 'Untitled';
+  document.getElementById('sub').textContent =
+    [next.site, next.size, next.condition, next.price ? `£${next.price}` : null]
+    .filter(Boolean).join(' · ');
+}
+
+async function label(value) {
+  if (!current) return;
+  await fetch('/api/labeller/label', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({listing_id: current.id, label: value})
+  });
+  loadNext();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowLeft' || e.key === 'j' || e.key === 'J') label('dont_want');
+  if (e.key === 'ArrowRight' || e.key === 'l' || e.key === 'L') label('want');
+  if (e.key === 's' || e.key === 'S') label('skip');
+});
+
+loadNext();
+</script>
+</body>
+</html>
