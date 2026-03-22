@@ -16,7 +16,7 @@ classifier.ready = False
 
 logger = logging.getLogger(__name__)
 
-# Module-level scheduler instance (shared with main.py)
+# Module-level scheduler instance (recreated on each start() to avoid stale event loop refs)
 scheduler = AsyncIOScheduler(timezone="UTC")
 _db = None
 _broadcast_fn = None  # optional: async fn(event_dict) for WebSocket push
@@ -30,7 +30,10 @@ def init_scheduler(db, broadcast_fn=None):
 
 
 def start():
+    global scheduler
     if not scheduler.running:
+        # Recreate to avoid holding a reference to a closed event loop (e.g. between tests)
+        scheduler = AsyncIOScheduler(timezone="UTC")
         scheduler.add_job(
             _run_all_active_jobs,
             trigger=IntervalTrigger(minutes=5, timezone="UTC"),
