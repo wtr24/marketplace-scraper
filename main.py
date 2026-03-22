@@ -5,8 +5,10 @@ import asyncio
 import json
 import logging
 import os
+import random
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 import uvicorn
@@ -121,6 +123,40 @@ class BenchmarkRequest(BaseModel):
     search_term: str = "vintage jacket"
     engines: Optional[list[str]] = None   # None = all
     sites: Optional[list[str]] = None     # None = all
+
+
+class LabelRequest(BaseModel):
+    listing_id: int
+    label: str
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, v):
+        if v not in ("want", "dont_want", "skip"):
+            raise ValueError("label must be want, dont_want, or skip")
+        return v
+
+
+# ─── Labeller helpers ────────────────────────────────────────────────────────
+
+LABELS_FILE = Path("data/classifier/labels.json")
+_SYNCHILLA_KEYWORDS = {"synchilla", "snap-t", "snap t", "patagonia fleece"}
+
+
+def _load_labels() -> dict:
+    if LABELS_FILE.exists():
+        return json.loads(LABELS_FILE.read_text())
+    return {}
+
+
+def _save_labels(labels: dict):
+    LABELS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    LABELS_FILE.write_text(json.dumps(labels, indent=2))
+
+
+def _is_synchilla(title: str) -> bool:
+    t = title.lower()
+    return any(kw in t for kw in _SYNCHILLA_KEYWORDS)
 
 
 # ─── API Routes ──────────────────────────────────────────────────────────────
@@ -356,6 +392,59 @@ async def test_discord():
     return {"message": message}
 
 
+# ─── Labeller API ────────────────────────────────────────────────────────────
+
+@app.get("/api/labeller/progress")
+async def labeller_progress():
+    labels = _load_labels()
+    want = sum(1 for v in labels.values() if v.get("label") == "want" and v.get("source") == "user")
+    dont_want = sum(1 for v in labels.values() if v.get("label") == "dont_want" and v.get("source") == "user")
+    listings, _ = await db.get_listings(limit=10000, offset=0)
+    synchilla_ids = {l.id for l in listings if _is_synchilla(l.title or "")}
+    return {"labelled": want + dont_want, "total": len(synchilla_ids),
+            "want_count": want, "dont_want_count": dont_want}
+
+
+@app.get("/api/labeller/next")
+async def labeller_next():
+    labels = _load_labels()
+    labelled_ids = {v.get("listing_id") for v in labels.values() if v.get("source") == "user"}
+    listings, _ = await db.get_listings(limit=10000, offset=0)
+    candidates = [
+        l for l in listings
+        if _is_synchilla(l.title or "")
+        and l.image_url
+        and l.id not in labelled_ids
+    ]
+    if not candidates:
+        return {"done": True, "remaining": 0}
+    item = random.choice(candidates)
+    return {
+        "id": item.id, "image_url": item.image_url,
+        "title": item.title, "price": item.price,
+        "site": item.site, "size": item.size,
+        "condition": item.condition,
+        "remaining": len(candidates),
+    }
+
+
+@app.post("/api/labeller/label")
+async def labeller_label(req: LabelRequest):
+    if req.label == "skip":
+        return {"status": "skipped"}
+    labels = _load_labels()
+    labels[f"user_{req.listing_id}"] = {
+        "label": req.label, "source": "user", "listing_id": req.listing_id
+    }
+    _save_labels(labels)
+    return {"status": "saved", "label": req.label}
+
+
+@app.get("/labeller")
+async def labeller_ui():
+    return FileResponse("ui/labeller.html")
+
+
 # ─── WebSocket ───────────────────────────────────────────────────────────────
 
 @app.websocket("/ws")
@@ -368,6 +457,41 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         connected_clients.remove(websocket)
+
+
+# ─── PWA Static Files ────────────────────────────────────────────────────────
+
+_UI_ROOT = os.path.join(os.path.dirname(__file__), "ui")
+
+
+@app.get("/manifest.json", include_in_schema=False)
+async def pwa_manifest():
+    return FileResponse(
+        os.path.join(_UI_ROOT, "manifest.json"),
+        media_type="application/manifest+json",
+    )
+
+
+@app.get("/sw.js", include_in_schema=False)
+async def pwa_service_worker():
+    return FileResponse(
+        os.path.join(_UI_ROOT, "sw.js"),
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/"},
+    )
+
+
+@app.get("/icons/{filename}", include_in_schema=False)
+async def pwa_icon(filename: str):
+    # Prevent path traversal
+    if ".." in filename or "/" in filename:
+        raise HTTPException(status_code=400)
+    path = os.path.join(_UI_ROOT, "icons", filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404)
+    ext = filename.rsplit(".", 1)[-1].lower()
+    media = {"svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "webp": "image/webp"}
+    return FileResponse(path, media_type=media.get(ext, "application/octet-stream"))
 
 
 # ─── Static UI ───────────────────────────────────────────────────────────────
