@@ -8,6 +8,12 @@ from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
+from classifier import FleeceClassifier as _FleeceClassifier
+
+# Placeholder — replaced at startup by main.py lifespan injection
+classifier: _FleeceClassifier = _FleeceClassifier.__new__(_FleeceClassifier)
+classifier.ready = False
+
 logger = logging.getLogger(__name__)
 
 # Module-level scheduler instance (shared with main.py)
@@ -84,6 +90,16 @@ async def _refresh_proxies():
         logger.error(f"[proxy] Refresh failed: {exc}", exc_info=True)
 
 
+async def _filter_by_classifier(listings: list[dict]) -> list[dict]:
+    """Filter listings through FleeceClassifier. Falls back to full list if classifier not ready."""
+    if not classifier.ready:
+        return listings
+    results = await asyncio.gather(*[
+        classifier.classify(item.get("image_url")) for item in listings
+    ])
+    return [item for item, r in zip(listings, results) if r["want"]]
+
+
 async def _run_all_active_jobs():
     if _db is None:
         return
@@ -134,6 +150,7 @@ async def _execute_job(job):
             result = await engine.scrape(site, job.search_term)
 
             items_new, new_items = await _db.upsert_listings(result.listings, job_id=job.id)
+            new_items = await _filter_by_classifier(new_items)
 
             sr = await _db.save_scraper_result({
                 "job_id": job.id,

@@ -63,6 +63,8 @@ async def broadcast(event: dict):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init()
+    from classifier import FleeceClassifier
+    sched.classifier = FleeceClassifier("classifier/fleece_classifier.onnx")
     sched.init_scheduler(db, broadcast_fn=broadcast)
     sched.start()
     logger.info(f"Marketplace Scraper running on port {PORT}")
