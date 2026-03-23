@@ -1,14 +1,12 @@
 """Discord webhook integration — sends rich embed alerts for fleece/synchilla listings."""
 import logging
 import os
+import re
 from typing import Optional
 
 import httpx
 
 logger = logging.getLogger(__name__)
-
-# Keywords that trigger an alert (case-insensitive, checked against title + description)
-ALERT_KEYWORDS = {"fleece", "synchilla"}
 
 # Platform accent colours (Discord decimal integers)
 _PLATFORM_COLOURS = {
@@ -33,13 +31,92 @@ _PLATFORM_ICONS = {
 }
 
 
+# Sizes we want alerts for. If the size field is populated and not in this set → skip.
+_WANTED_SIZES = {"xl", "l", "m", "large", "medium", "extra large", "extra-large"}
+_UNWANTED_SIZES = {"xs", "s", "xxs", "small", "extra small"}
+
+# Kids-related patterns in titles — reject anything that matches
+_KIDS_RE = re.compile(
+    r"\b(kids?|children|child|boys?|girls?|baby|babies|toddler|youth|infant|junior"
+    r"|aged?\s*\d|\d+[-–]\d+\s*(months?|yrs?|years?|yr)|\d+\s*months?)\b",
+    re.IGNORECASE,
+)
+
+# Style exclusions — reject if any match (unless premium override applies)
+_EXCLUDE_RE = re.compile(
+    r"\b(hooded?|hoodie|full[\s-]zip|gilet|gilets|body\s*warmer|bodywarmer)\b",
+    re.IGNORECASE,
+)
+
+# Premium terms — if present, override style exclusions (but NOT brand/style/kids/size rules)
+_PREMIUM_RE = re.compile(
+    r"\b(rare|vintage|multi[\s-]?colou?r(?:ed)?|deadstock|limited)\b",
+    re.IGNORECASE,
+)
+
+
 def matches_keyword(listing: dict) -> bool:
-    """Return True if title or description contains any alert keyword (case-insensitive)."""
-    haystack = " ".join(filter(None, [
-        listing.get("title") or "",
-        listing.get("description") or "",
-    ])).lower()
-    return any(kw in haystack for kw in ALERT_KEYWORDS)
+    """
+    Return True only for Patagonia Synchilla / Snap-T listings that pass all filters.
+
+    MUST HAVE:
+      - "patagonia" in title
+      - "synchilla" or "snap-t" / "snap t" in title
+
+    SIZE:
+      - Reject XS / S
+      - Reject kids/children size language in title
+      - If size field is populated, reject anything not in wanted sizes
+        (empty/unknown size fields pass through)
+
+    STYLE EXCLUSIONS (skip unless premium override):
+      - hooded / hoodie
+      - full zip / full-zip
+      - gilet / bodywarmer
+
+    PREMIUM OVERRIDE (bypass style exclusions only):
+      - rare / vintage / multicolour / deadstock / limited
+    """
+    title = (listing.get("title") or "").lower()
+    size_field = (listing.get("size") or "").strip().lower()
+
+    # 1. Must contain "patagonia"
+    if "patagonia" not in title:
+        return False
+
+    # 2. Must be a Synchilla or Snap-T
+    is_synchilla = "synchilla" in title
+    is_snap_t    = bool(re.search(r"snap[\s-]t\b", title))
+    if not (is_synchilla or is_snap_t):
+        return False
+
+    # 3. Reject kids clothing (title-based)
+    if _KIDS_RE.search(title):
+        logger.debug(f"[filter] Rejected (kids): {listing.get('title')}")
+        return False
+
+    # 4. Reject XS / S sizes
+    if size_field in _UNWANTED_SIZES:
+        logger.debug(f"[filter] Rejected (size={size_field}): {listing.get('title')}")
+        return False
+    if size_field and size_field not in _WANTED_SIZES:
+        # Size field is populated but not a recognised adult M/L/XL — skip
+        logger.debug(f"[filter] Rejected (unknown size={size_field}): {listing.get('title')}")
+        return False
+    if re.search(r"\bxs\b", title) and not size_field:
+        # XS mentioned in title but no size field
+        logger.debug(f"[filter] Rejected (xs in title): {listing.get('title')}")
+        return False
+
+    # 5. Check premium override before style exclusions
+    is_premium = bool(_PREMIUM_RE.search(title))
+
+    # 6. Style exclusions (bypassed if premium)
+    if not is_premium and _EXCLUDE_RE.search(title):
+        logger.debug(f"[filter] Rejected (style exclusion): {listing.get('title')}")
+        return False
+
+    return True
 
 
 def _build_embed(listing: dict) -> dict:
