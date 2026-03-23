@@ -8,6 +8,18 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# ── Webhook avatar ────────────────────────────────────────────────────────────
+# Upload a 512×512 square PNG of the Patagonia mountain mark to imgur and paste
+# the direct URL here (e.g. https://i.imgur.com/XXXXXXX.png).
+# The image must be square — a circular Discord crop of a landscape logo looks bad.
+# Best source: screenshot the Patagonia mountain/Fitzroy peaks icon from their
+# website or app, upload to imgur.com → right-click image → copy image address.
+WEBHOOK_AVATAR_URL = os.getenv(
+    "FLEECE_AVATAR_URL",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2a/"
+    "Patagonia_%28Unternehmen%29_logo.svg/200px-Patagonia_%28Unternehmen%29_logo.svg.png",
+)
+
 # Platform accent colours (Discord decimal integers)
 _PLATFORM_COLOURS = {
     "ebay":   0x0064D2,  # eBay blue
@@ -194,7 +206,7 @@ async def send_fleece_alert(listing: dict, webhook_url: str) -> bool:
     embed = _build_embed(listing)
     payload = {
         "username": "Fleece Alert",
-        "avatar_url": "https://assets.stickpng.com/images/6130b76619b055000483bbaa.png",
+        "avatar_url": WEBHOOK_AVATAR_URL,
         "embeds": [embed],
     }
 
