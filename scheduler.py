@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 from datetime import datetime, timezone, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -20,6 +21,17 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler(timezone="UTC")
 _db = None
 _broadcast_fn = None  # optional: async fn(event_dict) for WebSocket push
+
+# Per-site concurrency limits — prevent browser floods that trigger IP bans
+_SITE_LIMITS = {"vinted": 2, "depop": 3, "ebay": 3}
+_SITE_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
+
+
+def _site_semaphore(site: str) -> asyncio.Semaphore:
+    """Lazily create per-site semaphore so it binds to the running event loop."""
+    if site not in _SITE_SEMAPHORES:
+        _SITE_SEMAPHORES[site] = asyncio.Semaphore(_SITE_LIMITS.get(site, 2))
+    return _SITE_SEMAPHORES[site]
 
 
 def init_scheduler(db, broadcast_fn=None):
@@ -147,59 +159,66 @@ async def _execute_job(job):
     engine = get_engine(job.engine)
 
     for site in sites:
-        start = datetime.utcnow()
-        try:
-            logger.info(f"[scheduler] job={job.id} engine={job.engine} site={site} term='{job.search_term}'")
-            result = await engine.scrape(site, job.search_term)
+        # Jitter before acquiring the semaphore — staggers concurrent job starts
+        await asyncio.sleep(random.uniform(0, 12))
 
-            items_new, new_items = await _db.upsert_listings(result.listings, job_id=job.id)
-            new_items = await _filter_by_classifier(new_items)
+        # eBay is static HTML — BS4 is faster and less detectable than Playwright
+        site_engine = get_engine("beautifulsoup") if site == "ebay" else engine
 
-            sr = await _db.save_scraper_result({
-                "job_id": job.id,
-                "engine": job.engine,
-                "site": site,
-                "run_at": start,
-                "duration_ms": result.duration_ms,
-                "items_found": len(result.listings),
-                "items_new": items_new,
-                "success": result.success,
-                "error_message": result.error_message,
-                "memory_mb": result.memory_mb,
-            })
+        async with _site_semaphore(site):
+            start = datetime.utcnow()
+            try:
+                logger.info(f"[scheduler] job={job.id} engine={job.engine} site={site} term='{job.search_term}'")
+                result = await site_engine.scrape(site, job.search_term)
 
-            logger.info(
-                f"[scheduler] job={job.id} site={site}: "
-                f"found={len(result.listings)} new={items_new} "
-                f"time={result.duration_ms}ms"
-            )
+                items_new, new_items = await _db.upsert_listings(result.listings, job_id=job.id)
+                new_items = await _filter_by_classifier(new_items)
 
-            if _broadcast_fn and items_new > 0:
-                await _broadcast_fn({
-                    "type": "new_listings",
+                sr = await _db.save_scraper_result({
                     "job_id": job.id,
+                    "engine": job.engine,
                     "site": site,
-                    "count": items_new,
+                    "run_at": start,
+                    "duration_ms": result.duration_ms,
+                    "items_found": len(result.listings),
+                    "items_new": items_new,
+                    "success": result.success,
+                    "error_message": result.error_message,
+                    "memory_mb": result.memory_mb,
                 })
 
-            # Discord fleece alerts — only for genuinely new listings
-            if new_items and discord_url:
-                alerts_sent = await send_fleece_alerts(new_items, discord_url)
-                if alerts_sent:
-                    logger.info(f"[discord] {alerts_sent} fleece alert(s) sent for job={job.id} site={site}")
+                logger.info(
+                    f"[scheduler] job={job.id} site={site}: "
+                    f"found={len(result.listings)} new={items_new} "
+                    f"time={result.duration_ms}ms"
+                )
 
-        except Exception as exc:
-            logger.error(f"[scheduler] job={job.id} site={site} error: {exc}", exc_info=True)
-            await _db.save_scraper_result({
-                "job_id": job.id,
-                "engine": job.engine,
-                "site": site,
-                "run_at": start,
-                "duration_ms": 0,
-                "items_found": 0,
-                "items_new": 0,
-                "success": False,
-                "error_message": str(exc),
-            })
+                if _broadcast_fn and items_new > 0:
+                    await _broadcast_fn({
+                        "type": "new_listings",
+                        "job_id": job.id,
+                        "site": site,
+                        "count": items_new,
+                    })
+
+                # Discord fleece alerts — only for genuinely new listings
+                if new_items and discord_url:
+                    alerts_sent = await send_fleece_alerts(new_items, discord_url)
+                    if alerts_sent:
+                        logger.info(f"[discord] {alerts_sent} fleece alert(s) sent for job={job.id} site={site}")
+
+            except Exception as exc:
+                logger.error(f"[scheduler] job={job.id} site={site} error: {exc}", exc_info=True)
+                await _db.save_scraper_result({
+                    "job_id": job.id,
+                    "engine": job.engine,
+                    "site": site,
+                    "run_at": start,
+                    "duration_ms": 0,
+                    "items_found": 0,
+                    "items_new": 0,
+                    "success": False,
+                    "error_message": str(exc),
+                })
 
     await _db.mark_job_run(job.id)
