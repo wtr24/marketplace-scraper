@@ -16,8 +16,7 @@ logger = logging.getLogger(__name__)
 # website or app, upload to imgur.com → right-click image → copy image address.
 WEBHOOK_AVATAR_URL = os.getenv(
     "FLEECE_AVATAR_URL",
-    "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2a/"
-    "Patagonia_%28Unternehmen%29_logo.svg/200px-Patagonia_%28Unternehmen%29_logo.svg.png",
+    "https://i.pinimg.com/736x/ef/77/41/ef7741f1117eb4a3b98d7412033a038d.jpg",
 )
 
 # Platform accent colours (Discord decimal integers)
